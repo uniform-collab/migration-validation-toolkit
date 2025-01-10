@@ -1,0 +1,22 @@
+{
+  "name": "tests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/compositions.js && npx playwright test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.10.0"
+  },
+  "dependencies": {
+    "@uniformdev/canvas": "^19.207.0",
+    "contentstack": "^3.22.2",
+    "dotenv": "^16.4.5"
+  }
+}

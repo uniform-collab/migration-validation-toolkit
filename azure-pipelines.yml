@@ -1,0 +1,38 @@
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+stages:
+
+- stage: scripts
+
+  displayName: 'Copy scripts'
+
+  dependsOn: []
+
+  jobs:
+
+  - job: copy_scripts
+
+    pool:
+      name: Default
+
+    workspace:
+      clean: all
+            
+    steps:
+    - checkout: self
+      clean: true
+      fetchDepth: 1
+    
+    - powershell: |
+        MKDIR $(Build.ArtifactStagingDirectory)\Scripts
+        Copy-Item * -Destination $(Build.ArtifactStagingDirectory)\Scripts -Recurse -Force -Exclude .git
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'output artifact [Scripts]'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)\Scripts'
+        ArtifactName: Scripts
+      continueOnError: true
