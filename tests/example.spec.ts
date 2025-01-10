@@ -49,7 +49,7 @@ const count = ids.length;
 
 const testPrefix = 'Check composition #';
 for (var i = 0; i < count; ++i) {
-  test(`${testPrefix}${i}: ${names[i]}, ${ids[i]}`, async ({ }) => {
+  test(`${testPrefix}${i}: ${names[i]}, ${ids[i]}`, async () => {
     const title = test.info().title.substring(testPrefix.length);
     const match = title.match(/\: (.+)\, (.+)/);
     if (!match) throw new Error("regex");
@@ -113,19 +113,13 @@ for (var i = 0; i < count; ++i) {
         });
 
         // Assert that the digit is not greater than 0
-        if (!fs.existsSync('data/screenshots/screenshots-errors')) fs.mkdirSync('data/screenshots/screenshots-errors');
-        await page.screenshot({ path: 'data/screenshots/screenshots-errors/' + id + '.png', type: 'png' })
         expect(digit, `Test failed: There are ${digit} errors on ${name} composition.`).toBeLessThanOrEqual(0);
       } else {
-        if (!fs.existsSync('data/screenshots/screenshots-no-errors')) fs.mkdirSync('data/screenshots/screenshots-no-errors');
-        await page.screenshot({ path: 'data/screenshots/screenshots-no-errors/' + id + '.png', type: 'png' })
         console.log('Button with data-testid="composition-validation-error" not found.');
       }
-    } catch (ex) {
-      if (!fs.existsSync('data/screenshots/screenshots-catch')) fs.mkdirSync('data/screenshots/screenshots-catch');
-      fs.writeFileSync('data/screenshots/screenshots-catch/' + id + '.json', ex.message);
-      await page.screenshot({ path: 'data/screenshots/screenshots-catch/' + id + '.png', type: 'png' })
-      throw ex;
+    } finally {
+      const screenshot = await page.screenshot({ path: 'data/screenshots/' + id + '.png', type: 'png' })
+      test.info().attach('screenshot', { body: screenshot, contentType: 'image/png' });        
     }
   });
 } 
