@@ -4,6 +4,29 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 dotenv.config();
 
+async function login(page) {
+  console.log('🔐 Performing login...');
+
+  await page.waitForSelector('#username, input[type="email"]', { timeout: 10000 });
+  if (await page.locator('#username').count()) {
+    await page.fill('#username', process.env.UNIFORM_USERNAME!);
+  } else {
+    await page.fill('input[type="email"]', process.env.UNIFORM_USERNAME!);
+  }
+  await page.click('button[type="submit"]');
+
+  await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+  await page.fill('input[type="password"]', process.env.UNIFORM_PASSWORD!);
+  await page.click('button[type="submit"]');
+
+  await page.waitForNavigation({ timeout: 20000 });
+
+  const url = page.url();
+
+  console.log('Redirected to:', url); // For debugging, log the redirected URL
+  console.log('✅ Login completed successfully.');
+}
+
 function env(key, options) {
   const v = process.env[key];
   const helpText = options ? 'You can choose from these options: ' + options.join(', ') : '';
@@ -59,14 +82,25 @@ for (var i = 0; i < count; ++i) {
 
     const page = await browser.newPage();
 
-
     try {
-
-      await page.goto(`https://uniform.app/projects/${env('UNIFORM_PROJECT_ID')}/dashboards/canvas/edit/${id}`);
+      
+      const url = `https://uniform.app/projects/${env('UNIFORM_PROJECT_ID',undefined)}/dashboards/canvas/edit/${id}`;
+      await page.goto(url);
       await page.waitForLoadState('load'); // Wait for network to be idle
 
+      await Promise.race([
+        page.waitForSelector('button[data-testid="multioptions-button-main"][data-test-role="header-button"]', { timeout: 10000 }),
+        page.waitForSelector('#username, input[type="email"]', { timeout: 10000 })
+      ]);
+
+      const finalUrl = page.url();
+      if (finalUrl.includes('login.uniform.app')) {
+        await login(page);       
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+      }
+
       console.log('Waiting for Save button to load...');
-      await page.locator('button[data-testid="multioptions-button-main"]').waitFor({ timeout: 30000 });
+      await page.locator('button[data-testid="multioptions-button-main"][data-test-role="header-button"]').waitFor({ timeout: 30000 });
 
       try {
         await page.locator('button[data-testid="composition-validation-error"]').waitFor({ timeout: 30000 });
