@@ -36,16 +36,25 @@ export default defineConfig({
   /* Configure projects for major browsers */
   projects: [
     {
-      name: 'setup',
-      testMatch: /global\.setup\.ts/,
+      name: 'compositions-setup',
+      testMatch: /compositions.global.setup.ts/,
     },
     {
-      name: 'chromium',
-      testMatch: /.*\.spec\.ts/,
+      name: 'compositions',
+      testMatch: /compositions.spec.ts/,
       use: { ...devices['Desktop Chrome'] },
-      dependencies: ['setup'],
+      dependencies: ['compositions-setup'],
     },
-
+    {
+      name: 'entries-setup',
+      testMatch: /entries.global.setup.ts/,
+    },
+    {
+      name: 'entries',
+      testMatch: /entries.spec.ts/,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['entries-setup'],
+    },
     // {
     //   name: 'firefox',
     //   use: { ...devices['Desktop Firefox'] },

@@ -32,7 +32,7 @@ else
   while (result.compositions.length === fetchVolume) {
     console.log('Checking if there are more on server with offset ' + compositions.length);
     result = await client.getCompositionList({
-      limit: 1000, skipPatternResolution: true,
+      limit: fetchVolume, skipPatternResolution: true,
       offset: compositions.length
     });
 
@@ -43,7 +43,6 @@ else
   }
     
   const data = compositions
-    .filter(x => x.composition.type === "blogArticle") // filter only blog articles
     .map(x => ({ id: x.composition._id, name: x.composition._name }))
     .map(x => ({ id: x.id, name: x.name.replace(/\n/g, '') })) // trim name
     .map(x => x);

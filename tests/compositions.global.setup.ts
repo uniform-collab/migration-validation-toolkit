@@ -1,17 +1,6 @@
 import { chromium, expect, test as setup } from '@playwright/test';
 import fs from 'fs';
-import dotenv from 'dotenv';
-dotenv.config();
-
-function env(key) {
-    const v = process.env[key];
-    if (!v) 
-    {
-        throw new Error("Add this env variable to .env file: " + key);
-    }
-    
-    return v;
-}
+import { env } from './utils';
 
 setup('login', async ({ }) => {
     expect(fs.existsSync('data/compositions.json'), 'no compositions.json file, please run yarn test');
@@ -22,14 +11,15 @@ setup('login', async ({ }) => {
     
     const page = await browser.newPage();
     const compositions = JSON.parse(fs.readFileSync('data/compositions.json', 'utf-8'));
-    const compId = compositions[0].id;
-    await page.goto(`https://uniform.app/projects/${env('UNIFORM_PROJECT_ID')}/dashboards/canvas/edit/${compId}`);
+    const id = compositions[0].id;
+    const url = `https://uniform.app/projects/${env('UNIFORM_PROJECT_ID')}/dashboards/canvas/edit/${id}`
+    await page.goto(url);
 
     await page.waitForLoadState('load'); // Wait for network to be idle
 
     console.log('Waiting for Save button to load...');
     try {
-        await page.locator('button[data-testid="multioptions-button-main"]').waitFor({ timeout: 10000, });
+        await page.locator('button[data-testid="multioptions-button-main"][data-test-role="header-button"]').waitFor({ timeout: 10000, });
         console.log('Cookies worked well!');
         await browser.close();
         return;
