@@ -41,7 +41,7 @@ for (var i = 0; i < count; ++i) {
 
     try {
       
-      const url = `https://uniform.app/projects/${env('UNIFORM_PROJECT_ID',undefined)}/dashboards/canvas/edit/${id}`;
+      const url = `https://uniform.app/projects/${env('UNIFORM_PROJECT_ID',undefined)}/dashboards/canvas/entries/${id}`;
       await page.goto(url);
       await page.waitForLoadState('load'); // Wait for network to be idle
 
