@@ -109,8 +109,13 @@ for (var i = 0; i < count; ++i) {
         console.log('Button with data-testid="composition-validation-error" not found.');
       }
     } finally {
-      const screenshot = await page.screenshot({ path: 'data/screenshots/' + id + '.png', type: 'png' })
-      test.info().attach('screenshot', { body: screenshot, contentType: 'image/png' });        
+      const screenshotPath = `data/screenshots/${id}.png`;
+      await page.screenshot({ path: screenshotPath, type: 'png' });
+      test.info().attachments.push({
+        name: 'screenshot',
+        path: screenshotPath,
+        contentType: 'image/png',
+      });       
     }
   });
 } 
