@@ -1,0 +1,24 @@
+{
+  "name": "compare-websites",
+  "type": "module",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "run 'crawl', then 'screenshot', then 'diff'",
+    "crawl": "node ./scripts/crawl.js",
+    "screenshots": "node ./scripts/screenshot-main.js",
+    "diff": "node ./scripts/diff-main.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "open": "^10.1.0",
+    "pixelmatch": "^6.0.0",
+    "playwright": "^1.49.1",
+    "pngjs": "^7.0.0",
+    "dotenv": "^16.4.5"
+  }
+}
