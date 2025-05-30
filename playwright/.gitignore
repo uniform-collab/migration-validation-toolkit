@@ -1,4 +1,4 @@
-*/node_modules/
+node_modules/
 /test-results/
 /playwright-report/
 /blob-report/
@@ -7,5 +7,3 @@
 !/data/compositions.json
 .env
 pnpm-lock.yaml
-.temp/
-.comparison_results/
