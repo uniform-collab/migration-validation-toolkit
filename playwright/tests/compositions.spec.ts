@@ -5,8 +5,12 @@ import { env, login } from './utils';
 console.log('Reading compositions from compositions.json');
 const compositions = JSON.parse(fs.readFileSync('data/compositions.json', 'utf-8'));
 
-const ids = compositions.map(x => x.id);
-const names = compositions.map(x => x.name);
+console.log(`Found ${compositions.length} compositions.`);
+const skipPatterns = compositions.filter(x => !x.pattern);
+console.log(`Skipping patterns, the rest of the compositions ${skipPatterns.length}.`);
+
+const ids = skipPatterns.map(x => x.id);
+const names = skipPatterns.map(x => x.name);
 
 const mode = env('ERROR_TYPES', ['errors', 'warnings', 'all']);
 

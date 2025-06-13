@@ -42,10 +42,7 @@ else
     }
   }
     
-  const data = compositions
-    .map(x => ({ id: x.composition._id, name: x.composition._name }))
-    .map(x => ({ id: x.id, name: x.name.replace(/\n/g, '') })) // trim name
-    .map(x => x);
+  const data = compositions.map(x => ({ id: x.composition._id, name: x.composition._name.replace(/\n/g, ''), pattern: x.pattern }))
   
   try { 
     fs.mkdirSync('data', { recursive: true }); 
