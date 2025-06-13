@@ -3,6 +3,8 @@ import { fork } from 'child_process';
 import fs from 'fs';
 import { env } from "./utils.js";
 import dotenv from 'dotenv';
+import { create } from 'xmlbuilder2';
+import path from 'path';
 dotenv.config();
 
 // List of URLs for production site
@@ -58,8 +60,8 @@ for (let i = 0; i < numWorkers; i++) {
           // If all workers are done, output the result
           if (results.length === urls.length) {
             generateHtmlReport(results);
-  
-            console.log('✅ Processing complete:', results);        
+            generateXmlReport(results); 
+            console.log('✅ Processing complete. Results saved to ' + outputDir);        
           }
           
           resolve();
@@ -118,4 +120,43 @@ function generateHtmlReport(results) {
 </html>`;
 
   fs.writeFileSync(path.join(outputDir, "report.html"), htmlContent);
+}
+
+function generateXmlReport(results) {
+  const testSuite = {
+    testsuite: {
+      '@name': 'Visual Regression',
+      '@tests': results.length,
+      '@failures': results.filter(r => !r.match).length,
+      testcase: results.map((result) => {
+        const testCase = {
+          '@name': `Compare: ${result.url}`,
+          '@classname': 'ScreenshotComparison',
+        };
+
+        if (!result.match) {
+          testCase.failure = {
+            '@message': 'Visual mismatch detected',
+            '#': `Mismatch for ${result.url}.`,
+            '#': `Log: ${result.log}.`,
+          };
+
+          if (result.diffImg) {
+            const absolutePath = path.resolve(path.join(outputDir, result.diffImg));
+            testCase['attachments'] = {
+              attachment: {
+                '@path': absolutePath,
+                '@description': 'Visual diff image',
+              }
+            };
+          }
+        }
+
+        return testCase;
+      })
+    }
+  };
+
+  const xml = create(testSuite).end({ prettyPrint: true });
+  fs.writeFileSync(path.join(outputDir, "results.xml"), xml, { encoding: "utf8" });
 }
