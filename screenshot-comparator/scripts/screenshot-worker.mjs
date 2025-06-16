@@ -30,6 +30,9 @@ async function doWork(obj) {
             await prodPage.goto(prodUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
             await prodPage.screenshot({ path: prodImgPath, fullPage: true });
             await prodPage.close();
+            console.log(`🟦 Screenshot taken for production URL: ${prodUrl}`);
+        }else{
+            console.log(`🟦 Screenshot already exists for production URL: ${prodUrl}`);
         }
 
         if (!fs.existsSync(migratedImgPath)) {
@@ -45,6 +48,9 @@ async function doWork(obj) {
             await stagePage.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
             await stagePage.screenshot({ path: migratedImgPath, fullPage: true });
             await stagePage.close();
+            console.log(`🟨 Screenshot taken for migrated URL: ${migratedUrl}`);
+        }else{
+            console.log(`🟨 Screenshot already exists for migrated URL: ${migratedUrl}`);
         }
 
         return true;

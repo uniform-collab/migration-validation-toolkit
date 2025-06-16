@@ -17,21 +17,12 @@ if(!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-if (fs.existsSync(outputDir)) {
-   fs.rmSync(outputDir, { recursive: true, force: true });
-}
-
-const screenshotsDir = path.join(outputDir ?? throwError('outputDir'), "screenshots");
-if (!fs.existsSync(screenshotsDir)) {
-  fs.mkdirSync(screenshotsDir, { recursive: true });
-}
-
-const screenshotsProdDir = path.join(screenshotsDir, "prod");
+const screenshotsProdDir = path.join(outputDir, "prod");
 if (!fs.existsSync(screenshotsProdDir)) {
   fs.mkdirSync(screenshotsProdDir, { recursive: true });
 }
 
-const screenshotsMigratedDir = path.join(screenshotsDir, "migrated");
+const screenshotsMigratedDir = path.join(outputDir, "migrated");
 if (!fs.existsSync(screenshotsMigratedDir)) {
   fs.mkdirSync(screenshotsMigratedDir, { recursive: true });
 }
@@ -117,7 +108,8 @@ function getFileName(url) {
     url = url.replace(env("PROD_WEBSITE_URL"), "");
     url = url.startsWith('/') ? url.substring(1) : url;
 
-    return encodeURLToFilename(url);
+    const filename = encodeURLToFilename(url);
+    return filename || 'index';
 }
 
 function throwError(msg) { throw new Error(msg)}

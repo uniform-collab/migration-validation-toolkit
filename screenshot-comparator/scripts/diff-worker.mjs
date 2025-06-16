@@ -110,7 +110,9 @@ function getFileName(url) {
     url = url.replace(env("STAGE_WEBSITE_URL"), "");
     url = url.replace(env("PROD_WEBSITE_URL"), "");
     url = url.startsWith('/') ? url.substring(1) : url;
-    return encodeURLToFilename(url);
+    
+    const filename = encodeURLToFilename(url);
+    return filename || 'index';
 }
 
 function encodeURLToFilename(url) {
