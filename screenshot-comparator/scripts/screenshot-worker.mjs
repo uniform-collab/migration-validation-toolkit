@@ -10,55 +10,113 @@ process.on('SIGTERM', () => {
     console.log('Worker received termination signal. Cleaning up...');
     process.exit(0);
 });
-  
+
 // Listen for messages from the main process
 process.on('message', async (obj) => {    
     process.send(await doWork(obj))
 });
 
 async function doWork(obj) {
-    const { prodUrl, migratedUrl, prodImgPath, migratedImgPath } = obj;
-   
+    const { prodUrl, migratedUrl } = obj;
+
+    const prodDir = path.join('.screenshots', 'prod', encodeURLToFolder(prodUrl));
+    const migratedDir = path.join('.screenshots', 'migrated', encodeURLToFolder(migratedUrl));
+
+    fs.mkdirSync(prodDir, { recursive: true });
+    fs.mkdirSync(migratedDir, { recursive: true });
+
     const browser = await chromium.launch();
-    const context = await browser.newContext({
-        viewport: { width: 1280, height: 720 }, // Set a fixed viewport size
-    });
-   
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+
     try {
-        if (!fs.existsSync(prodImgPath)) {
-            const prodPage = await context.newPage();
-            await prodPage.goto(prodUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
-            await prodPage.screenshot({ path: prodImgPath, fullPage: true });
-            await prodPage.close();
-            console.log(`🟦 Screenshot taken for production URL: ${prodUrl}`);
-        }else{
-            console.log(`🟦 Screenshot already exists for production URL: ${prodUrl}`);
+        const page = await context.newPage();
+
+        // Screenshot components from production
+        await page.goto(prodUrl, { waitUntil: 'networkidle', timeout: 90000 });
+        const prodComponents = await getComponentSelectors(page);
+        await screenshotComponents(page, prodComponents, prodDir);
+
+        // Screenshot components from staging
+        if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+            await page.setExtraHTTPHeaders({
+                'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+                'x-vercel-set-bypass-cookie': 'true'
+            });
         }
 
-        if (!fs.existsSync(migratedImgPath)) {
-            const stagePage = await context.newPage();
+        await page.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 });
+        const stageComponents = await getComponentSelectors(page);
+        await screenshotComponents(page, stageComponents, migratedDir);
 
-            if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-                await stagePage.setExtraHTTPHeaders({
-                    'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
-                    'x-vercel-set-bypass-cookie': 'true'
-                });
-            }
-            
-            await stagePage.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
-            await stagePage.screenshot({ path: migratedImgPath, fullPage: true });
-            await stagePage.close();
-            console.log(`🟨 Screenshot taken for migrated URL: ${migratedUrl}`);
-        }else{
-            console.log(`🟨 Screenshot already exists for migrated URL: ${migratedUrl}`);
-        }
-
+        await page.close();
         return true;
     } catch (error) {
-        console.error(`🆘 Error processing ${prodUrl}:`, error);
-
+        console.error(`🚘 Error processing ${prodUrl}:`, error);
         return false;
-    } finally { 
+    } finally {
         await browser.close();
     }
+}
+
+async function getComponentSelectors(page) {
+    return await page.evaluate(() => {
+        const selectors = [];
+        const header = document.querySelector('header');
+        const footer = document.querySelector('footer');
+
+        if (header) selectors.push({ name: 'header', selector: 'header' });
+
+        if (header && footer) {
+            const components = [];
+            let current = header.nextElementSibling;
+            let index = 0;
+            while (current && current !== footer) {
+                if (current.tagName.toLowerCase() !== 'script' && current.nodeType === 1) {
+                    const uniqueSelector = `div-${index}`;
+                    current.setAttribute('data-component-id', uniqueSelector);
+                    selectors.push({ name: uniqueSelector, selector: `[data-component-id="${uniqueSelector}"]` });
+                    index++;
+                }
+                current = current.nextElementSibling;
+            }
+        }
+
+        if (footer) selectors.push({ name: 'footer', selector: 'footer' });
+
+        return selectors;
+    });
+}
+
+async function screenshotComponents(page, components, outputDir) {
+    for (const comp of components) {
+        try {
+            const element = await page.$(comp.selector);
+            if (!element) {
+                console.warn(`⚠️ Selector not found: ${comp.selector}`);
+                continue;
+            }
+
+            const box = await element.boundingBox();
+            if (!box || box.width === 0 || box.height === 0) {
+                console.warn(`⚠️ Skipping invisible component: ${comp.name}`);
+                continue;
+            }
+
+            const filePath = path.join(outputDir, `${comp.name}.png`);
+            await element.screenshot({ path: filePath });
+            console.log(`📸 Component screenshot saved: ${filePath}`);
+        } catch (err) {
+            console.error(`🆘 Failed to screenshot ${comp.name}:`, err.message);
+        }
+    }
+}
+
+function encodeURLToFolder(url) {
+    const illegalCharsRegex = /[<>:"/\\|?*\0]/g;
+    return url.replace(env("STAGE_WEBSITE_URL"), "")
+              .replace(env("PROD_WEBSITE_URL"), "")
+              .replace(illegalCharsRegex, (char) => `%${char.charCodeAt(0).toString(16)}`)
+              .replace(/^\/+/g, '')
+              .replace(/\/+$/g, '')
+              .replace(/\//g, '_') || 'index';
 }
