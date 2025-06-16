@@ -127,11 +127,8 @@ function generateXmlReport(results) {
 
           if (result.diffImg) {
             const absolutePath = path.resolve(path.join(outputDir, result.diffImg));
-            testCase.attachments = {
-              attachment: {
-                '@path': absolutePath,
-                '@description': 'Visual diff image'
-              }
+            testCase['system-out'] = {
+              '#': `Screenshot diff: file://${absolutePath}`,
             };
           }
         }
