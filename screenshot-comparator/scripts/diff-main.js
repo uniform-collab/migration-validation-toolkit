@@ -10,7 +10,7 @@ const urls = JSON.parse(fs.readFileSync('./.temp/urls.json', { encoding: 'utf8'}
 const outputDir = "./.comparison_results";
 
 if (!fs.existsSync(outputDir)) {
-  throw new Error('🆘 outputDir does not exist: ' + outputDir);
+  fs.mkdirSync(outputDir, { recursive: true });
 }
 
 const numWorkers = 4;
@@ -21,10 +21,10 @@ for (let i = 0; i < numWorkers; i++) {
   const chunk = urls.slice(i * chunkSize, (i + 1) * chunkSize);
   for (let j = 0; j < chunk.length; ++j) {
     const prodUrl = chunk[j];
-    const stageUrl = prodUrl.replace(env("PROD_WEBSITE_URL"), env("STAGE_WEBSITE_URL"));
+    const migratedUrl = prodUrl.replace(env("PROD_WEBSITE_URL"), env("STAGE_WEBSITE_URL"));
 
-    const obj = { outputDir, prodUrl, stageUrl };
-    console.log('💠 Diff the screenshot of ' + obj.prodUrl + ' with ' + obj.stageUrl);
+    const obj = { outputDir, prodUrl, migratedUrl };
+    console.log('💠 Diff the screenshot of ' + obj.prodUrl + ' with ' + obj.migratedUrl);
 
     try {
       const worker = fork('./scripts/diff-worker.mjs');
@@ -60,7 +60,7 @@ for (let i = 0; i < numWorkers; i++) {
         });
       });
     } catch (ex) {
-      console.error('🆘 Failed to diff ' + obj.prodUrl + ' with ' + obj.stageUrl + ', ' + ex.message);
+      console.error('🆘 Failed to diff ' + obj.prodUrl + ' with ' + obj.migratedUrl + ', ' + ex.message);
     }
   }
 }
