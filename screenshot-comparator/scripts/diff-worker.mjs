@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import pixelmatch from 'pixelmatch';
-import { PNG } from 'pngjs';
+import resemble from 'resemblejs';
 import { env } from "./utils.js";
 import dotenv from 'dotenv';
 dotenv.config();
@@ -10,108 +9,97 @@ process.on('SIGTERM', () => {
     console.log('Worker received termination signal. Cleaning up...');
     process.exit(0);
 });
-  
-// Listen for messages from the main process
-process.on('message', async (obj) => {    
-    process.send(await doWork(obj))
+
+process.on('message', async (obj) => {
+    process.send(await doWork(obj));
 });
 
 async function doWork(obj) {
-    const {outputDir, prodUrl, stageUrl} = obj;
-    
+    const { outputDir, prodUrl, stageUrl } = obj;
+
     const screenshotsDir = path.join(outputDir ?? throwError('outputDir'), "screenshots");
- 
-    const diffDir1 = path.join(outputDir, "diffs");
+    const diffDir = path.join(outputDir, "diffs");
 
     const prodImgPath = path.join(screenshotsDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}-prod.png`);
     const stageImgPath = path.join(screenshotsDir, `${getFileName(stageUrl ?? throwError('stageUrl'))}-stage.png`);
-    const diffImgPath1 = path.join(diffDir1, `${getFileName(prodUrl)}-DIFF.png`);
+    const diffImgPath = path.join(diffDir, `${getFileName(prodUrl)}-DIFF.png`);
 
-    fs.mkdirSync(diffDir1, { recursive: true });
+    fs.mkdirSync(diffDir, { recursive: true });
 
     try {
         if (!fs.existsSync(prodImgPath) || !fs.existsSync(stageImgPath)) {
-            console.error(`🆘 One or both images do not exist: ${prodImgPath}, ${stageImgPath}`);
-            return ({
+            const log = `One or both images do not exist: ${prodImgPath}, ${stageImgPath}`;
+            console.error(`🆘 ${log}`);
+            return {
                 url: prodUrl,
                 prodImg: path.relative(outputDir, prodImgPath),
                 stageImg: path.relative(outputDir, stageImgPath),
                 diffImg: null,
                 match: false,
-                log: `One or both images do not exist: ${prodImgPath}, ${stageImgPath}`
-            });
+                mismatch: null,
+                log
+            };
         }
 
-        
-        const match = compareImages(prodImgPath, stageImgPath, diffImgPath1, parseFloat(15));
+        console.log(`🔗 Comparing screenshots:\n   🟦 ${prodImgPath}\n   🟨 ${stageImgPath}`);
 
-        return ({
+        const { match, mismatch, error } = await compareImages(prodImgPath, stageImgPath, diffImgPath);
+
+        return {
             url: prodUrl,
             prodImg: path.relative(outputDir, prodImgPath),
             stageImg: path.relative(outputDir, stageImgPath),
-            diffImg: match ? null : path.relative(outputDir, diffImgPath1),
-            match
-        });
+            diffImg: match ? null : path.relative(outputDir, diffImgPath),
+            match,
+            mismatch,
+            log: error ?? null
+        };
     } catch (error) {
-        console.error(`Error processing ${prodUrl}:`, error);
-
+        console.error(`❌ Error processing ${prodUrl}:`, error);
         return null;
-    } finally { 
-        //await browser.close();
     }
 }
 
-// Function to compare images
-function compareImages(prodImgPath, stageImgPath, diffImgPath) {
-    if (!fs.existsSync(prodImgPath) || !fs.existsSync(stageImgPath)) {
-        console.error(`🆘 One or both images do not exist: ${prodImgPath}, ${stageImgPath}`);
-        return false;
-    }
+async function compareImages(prodImgPath, stageImgPath, diffImgPath) {
+    const prodBuffer = fs.readFileSync(prodImgPath);
+    const stageBuffer = fs.readFileSync(stageImgPath);
 
-    const prodImg = PNG.sync.read(fs.readFileSync(prodImgPath));
-    const stageImg = PNG.sync.read(fs.readFileSync(stageImgPath));
+    console.log(`🧪 Buffer sizes — prod: ${prodBuffer.length}, stage: ${stageBuffer.length}`);
 
-    // Determine maximum dimensions
-    const width = Math.max(prodImg.width, stageImg.width);
-    const height = Math.max(prodImg.height, stageImg.height);
+    return new Promise((resolve, reject) => {
+        resemble(prodBuffer)
+            .compareTo(stageBuffer)
+            .ignoreAntialiasing()
+            .outputSettings({
+                errorColor: { red: 255, green: 0, blue: 0 },
+                errorType: 'flat',
+                transparency: 0.3,
+                largeImageThreshold: 1200,
+                useCrossOrigin: false
+            })
+            .onComplete(data => {
+                if (data.error) {
+                    console.error('❌ Resemble error:', data.error);
+                    const mismatch = 100.0;
+                    console.log(`📊 Mismatch percentage: ${mismatch.toFixed(2)}%`);
+                    return resolve({ match: false, mismatch, error: data.error });
+                }
 
-    // Create padded images with the maximum dimensions
-    const prodPadded = new PNG({ width, height });
-    const stagePadded = new PNG({ width, height });
+                let mismatch = parseFloat(data?.misMatchPercentage ?? '100.0');
+                if (isNaN(mismatch)) {
+                    mismatch = 100.0;
+                    console.warn('⚠️ misMatchPercentage was NaN, forced to 100.0');
+                }
 
-    PNG.bitblt(prodImg, prodPadded, 0, 0, prodImg.width, prodImg.height, 0, 0);
-    PNG.bitblt(stageImg, stagePadded, 0, 0, stageImg.width, stageImg.height, 0, 0);
+                console.log(`📊 Mismatch percentage: ${mismatch.toFixed(2)}%`);
 
-    // Prepare for comparison
-    const diff = new PNG({ width, height });
+                if (mismatch > 0 && typeof data.getBuffer === 'function') {
+                    fs.writeFileSync(diffImgPath, data.getBuffer());
+                    console.log('📷 Diff image saved to:', diffImgPath);
+                }
 
-    const threshold = process.env.PIXEL_MATCH_THRESHOLD ?? 15;
-    // Perform pixel comparison
-    const mismatchCount = pixelmatch(
-        prodPadded.data,
-        stagePadded.data,
-        diff.data,
-        width,
-        height,
-        { threshold: threshold }
-    );
-    console.log(`🔍 Comparing images: ${prodImgPath} vs ${stageImgPath} threshold: ${threshold} mismatchCount: ${mismatchCount} `);
-    // Save diff image if differences exist
-    if (mismatchCount > 0) {
-        console.log('📷 Saving diff to:', diffImgPath);
-        fs.writeFileSync(diffImgPath, PNG.sync.write(diff));
-        return false;
-    }
-    return true;
-}
-
-const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
-
-// Encode the URL to a filename
-function encodeURLToFilename(url) {
-    return url.replace(illegalCharsRegex, char => {
-        // Percent-encode illegal characters
-        return `%${char.charCodeAt(0).toString(16)}`;
+                resolve({ match: mismatch === 0, mismatch });
+            });
     });
 }
 
@@ -119,8 +107,16 @@ function getFileName(url) {
     url = url.replace(env("STAGE_WEBSITE_URL"), "");
     url = url.replace(env("PROD_WEBSITE_URL"), "");
     url = url.startsWith('/') ? url.substring(1) : url;
-
     return encodeURLToFilename(url);
 }
 
-function throwError(msg) { throw new Error(msg)}
+function encodeURLToFilename(url) {
+    const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
+    return url.replace(illegalCharsRegex, char =>
+        `%${char.charCodeAt(0).toString(16)}`
+    );
+}
+
+function throwError(msg) {
+    throw new Error(msg);
+}
