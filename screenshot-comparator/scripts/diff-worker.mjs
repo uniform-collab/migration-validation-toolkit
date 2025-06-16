@@ -15,14 +15,17 @@ process.on('message', async (obj) => {
 });
 
 async function doWork(obj) {
-    const { outputDir, prodUrl, stageUrl } = obj;
+    const { outputDir, prodUrl, migratedUrl } = obj;
 
-    const screenshotsDir = path.join(outputDir ?? throwError('outputDir'), "screenshots");
+    const screenshotsDir = "./.screenshots";
+    const screenshotsProdDir = path.join(screenshotsDir, "prod");
+    const screenshotsMigratedDir = path.join(screenshotsDir, "migrated");
+
     const diffDir = path.join(outputDir, "diffs");
 
-    const prodImgPath = path.join(screenshotsDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}-prod.png`);
-    const stageImgPath = path.join(screenshotsDir, `${getFileName(stageUrl ?? throwError('stageUrl'))}-stage.png`);
-    const diffImgPath = path.join(diffDir, `${getFileName(prodUrl)}-DIFF.png`);
+    const prodImgPath = path.join(screenshotsProdDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}.png`);
+    const stageImgPath = path.join(screenshotsMigratedDir, `${getFileName(migratedUrl ?? throwError('migratedUrl'))}.png`);
+    const diffImgPath = path.join(diffDir, `${getFileName(prodUrl)}.png`);
 
     fs.mkdirSync(diffDir, { recursive: true });
 

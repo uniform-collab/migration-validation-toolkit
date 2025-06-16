@@ -12,19 +12,28 @@ const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
 const urls = JSON.parse(fs.readFileSync('./.temp/urls.json', { encoding: 'utf8'}));
 
 // Output directories
-const outputDir = "./.comparison_results";
+const outputDir = "./.screenshots";
 if(!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// Create directories
 if (fs.existsSync(outputDir)) {
-//    fs.rmSync(outputDir, { recursive: true, force: true });
+   fs.rmSync(outputDir, { recursive: true, force: true });
 }
 
 const screenshotsDir = path.join(outputDir ?? throwError('outputDir'), "screenshots");
 if (!fs.existsSync(screenshotsDir)) {
   fs.mkdirSync(screenshotsDir, { recursive: true });
+}
+
+const screenshotsProdDir = path.join(screenshotsDir, "prod");
+if (!fs.existsSync(screenshotsProdDir)) {
+  fs.mkdirSync(screenshotsProdDir, { recursive: true });
+}
+
+const screenshotsMigratedDir = path.join(screenshotsDir, "migrated");
+if (!fs.existsSync(screenshotsMigratedDir)) {
+  fs.mkdirSync(screenshotsMigratedDir, { recursive: true });
 }
 
 // Number of worker processes
@@ -38,21 +47,21 @@ for (let i = 0; i < numWorkers; i++) {
   for (let j = 0; j < chunk.length; ++j) 
   {
     const prodUrl = chunk[j];
-    const stageUrl = prodUrl.replace(env("PROD_WEBSITE_URL"), env("STAGE_WEBSITE_URL"));
+    const migratedUrl = prodUrl.replace(env("PROD_WEBSITE_URL"), env("STAGE_WEBSITE_URL"));
 
-    const prodImgPath = path.join(screenshotsDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}-prod.png`);
-    const stageImgPath = path.join(screenshotsDir, `${getFileName(stageUrl ?? throwError('stageUrl'))}-stage.png`);
+    const prodImgPath = path.join(screenshotsProdDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}.png`);
+    const migratedImgPath = path.join(screenshotsMigratedDir, `${getFileName(migratedUrl ?? throwError('migratedUrl'))}.png`);
 
-    if (fs.existsSync(prodImgPath) && fs.existsSync(stageImgPath)){
+    if (fs.existsSync(prodImgPath) && fs.existsSync(migratedImgPath)){
       continue;
     }
 
-    const obj = { prodUrl, stageUrl, prodImgPath, stageImgPath };
+    const obj = { prodUrl, migratedUrl, prodImgPath, migratedImgPath };
     
     // Fork a new process for the worker
     const worker = fork('./scripts/screenshot-worker.mjs');
 
-    console.log('📸 Make screenshots Prod: ' + obj.prodUrl + ' and Stage :' + obj.stageUrl);
+    console.log('📸 Make screenshots Prod: ' + obj.prodUrl + ' and Stage :' + obj.migratedUrl);
 
     // Send the chunk to the worker
     worker.send(obj);    

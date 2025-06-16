@@ -17,7 +17,7 @@ process.on('message', async (obj) => {
 });
 
 async function doWork(obj) {
-    const { prodUrl, stageUrl, prodImgPath, stageImgPath } = obj;
+    const { prodUrl, migratedUrl, prodImgPath, migratedImgPath } = obj;
    
     const browser = await chromium.launch();
     const context = await browser.newContext({
@@ -32,7 +32,7 @@ async function doWork(obj) {
             await prodPage.close();
         }
 
-        if (!fs.existsSync(stageImgPath)) {
+        if (!fs.existsSync(migratedImgPath)) {
             const stagePage = await context.newPage();
 
             if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
@@ -42,8 +42,8 @@ async function doWork(obj) {
                 });
             }
             
-            await stagePage.goto(stageUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
-            await stagePage.screenshot({ path: stageImgPath, fullPage: true });
+            await stagePage.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
+            await stagePage.screenshot({ path: migratedImgPath, fullPage: true });
             await stagePage.close();
         }
 
