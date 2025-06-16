@@ -126,9 +126,11 @@ function generateXmlReport(results) {
           };
 
           if (result.diffImg) {
-            const absolutePath = path.resolve(path.join(outputDir, result.diffImg));
+            const relativePath = path.relative(outputDir, path.join(outputDir, result.diffImg));
             testCase['system-out'] = {
-              '#': `Screenshot diff: file://${absolutePath}`,
+              '#': `<![CDATA[
+            [[ATTACHMENT|${relativePath}]]
+            ]]>`,
             };
           }
         }
