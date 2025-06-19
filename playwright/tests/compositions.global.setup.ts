@@ -9,7 +9,8 @@ setup('login', async ({ }) => {
         headless: true,
     });
     
-    const page = await browser.newPage();
+    const page = await browser.newPage();    
+
     const compositions = JSON.parse(fs.readFileSync('data/compositions.json', 'utf-8'));
     const id = compositions[0].id;
     const url = `https://uniform.app/projects/${env('UNIFORM_PROJECT_ID')}/dashboards/canvas/edit/${id}`
@@ -22,6 +23,7 @@ setup('login', async ({ }) => {
         await page.locator('button[data-testid="multioptions-button-main"][data-test-role="header-button"]').waitFor({ timeout: 10000, });
         console.log('Cookies worked well!');
         await browser.close();
+        //await page.pause();
         return;
     }                
     catch(ex) {     
@@ -65,4 +67,5 @@ setup('login', async ({ }) => {
   
     //await context.close();
     await browser.close();
+    //await page.pause();
   });  

@@ -43,6 +43,15 @@ for (var i = 0; i < count; ++i) {
 
     const page = await browser.newPage();
 
+    if(fs.existsSync('data/uniform-localstorage.json')) {
+        const localStorageData = JSON.parse(fs.readFileSync('data/uniform-localstorage.json', 'utf-8'));
+        await page.addInitScript(storage => {
+            for (const [key, value] of Object.entries<string>(storage)) {
+                localStorage.setItem(key, value);
+            }
+        }, localStorageData);
+    }
+
     try {
       
       const url = `https://uniform.app/projects/${env('UNIFORM_PROJECT_ID',undefined)}/dashboards/canvas/edit/${id}`;
