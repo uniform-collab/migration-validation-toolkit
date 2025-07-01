@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "run 'crawl', then 'screenshot', then 'diff'",
+    "collect-entries": "node scripts/entries.js",
+    "build:urls": "node ./scripts/build-urls.js",
     "crawl": "node ./scripts/crawl.js",
     "screenshots": "node ./scripts/screenshot-main.js",
     "diff": "node ./scripts/diff-main.js"
@@ -13,6 +15,9 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@uniformdev/canvas": "^20.20.3",
+    "@uniformdev/project-map": "^20.20.3",
+    "@uniformdev/redirect": "^20.20.3",
     "axios": "^1.7.9",
     "canvas": "^3.1.0",
     "cheerio": "^1.0.0",

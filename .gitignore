@@ -10,3 +10,4 @@ pnpm-lock.yaml
 .temp/
 .comparison_results/
 .screenshots/
+/screenshot-comparator/data
