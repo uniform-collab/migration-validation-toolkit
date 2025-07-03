@@ -149,8 +149,9 @@ function generateXmlReport(results) {
       "@tests": results.length,
       "@failures": results.filter((r) => !r.match).length,
       testcase: results.map((result) => {
+        const tag = result.tag ?? 'unclassified';
         const testCase = {
-          "@name": `Compare: ${result.url}`,
+          "@name": `[${tag}]: ${result.url}`,
           "@classname": "ScreenshotComparison",
           properties: {
             property: [
