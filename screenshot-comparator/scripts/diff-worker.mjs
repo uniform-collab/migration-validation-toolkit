@@ -40,6 +40,7 @@ async function doWork(obj) {
                 diffImg: null,
                 match: false,
                 mismatch: null,
+                tag: getDiffTag(null),
                 log
             };
         }
@@ -54,6 +55,7 @@ async function doWork(obj) {
                 diffImg: null,
                 match: false,
                 mismatch: null,
+                tag: getDiffTag(null),
                 log
             };
         }
@@ -69,6 +71,7 @@ async function doWork(obj) {
             diffImg: match ? null : path.relative(outputDir, diffImgPath),
             match,
             mismatch,
+            tag: getDiffTag(mismatch),
             log: error ?? null
         };
     } catch (error) {
@@ -138,4 +141,16 @@ function encodeURLToFilename(url) {
 
 function throwError(msg) {
     throw new Error(msg);
+}
+
+function getDiffTag(mismatch) {
+    if(mismatch == null) {
+        return 'not compared';
+    }
+
+    if (mismatch === 0) return 'perfect-match';
+    if (mismatch <= 1) return 'minor-diff';
+    if (mismatch <= 5) return 'medium-diff';
+    if (mismatch <= 20) return 'major-diff';
+    return 'critical-diff';
 }
