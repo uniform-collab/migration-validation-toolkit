@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
-import { env } from "./utils.js";
+import { env, retryWithBackoff } from "./utils.js";
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -21,17 +21,19 @@ async function doWork(obj) {
    
     const browser = await chromium.launch();
     const context = await browser.newContext({
-        viewport: { width: 1280, height: 720 }, // Set a fixed viewport size
+        viewport: { width: 1280, height: 720 },
     });
    
     try {
         if (!fs.existsSync(prodImgPath)) {
             const prodPage = await context.newPage();
-            await prodPage.goto(prodUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
+            await retryWithBackoff(() =>
+                prodPage.goto(prodUrl, { waitUntil: 'networkidle', timeout: 90000 })
+            );
             await prodPage.screenshot({ path: prodImgPath, fullPage: true });
             await prodPage.close();
             console.log(`🟦 Screenshot taken for production URL: ${prodUrl}`);
-        }else{
+        } else {
             console.log(`🟦 Screenshot already exists for production URL: ${prodUrl}`);
         }
 
@@ -44,21 +46,22 @@ async function doWork(obj) {
                     'x-vercel-set-bypass-cookie': 'true'
                 });
             }
-            
-            await stagePage.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 }); // Wait for all resources to load
+
+            await retryWithBackoff(() =>
+                stagePage.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 })
+            );
             await stagePage.screenshot({ path: migratedImgPath, fullPage: true });
             await stagePage.close();
             console.log(`🟨 Screenshot taken for migrated URL: ${migratedUrl}`);
-        }else{
+        } else {
             console.log(`🟨 Screenshot already exists for migrated URL: ${migratedUrl}`);
         }
 
         return true;
     } catch (error) {
         console.error(`🆘 Error processing ${prodUrl}:`, error);
-
         return false;
-    } finally { 
+    } finally {
         await browser.close();
     }
 }

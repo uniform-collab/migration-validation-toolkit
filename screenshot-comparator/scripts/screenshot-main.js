@@ -52,7 +52,7 @@ for (let i = 0; i < numWorkers; i++) {
     // Fork a new process for the worker
     const worker = fork('./scripts/screenshot-worker.mjs');
 
-    console.log('📸 Make screenshots Prod: ' + obj.prodUrl + ' and Stage :' + obj.migratedUrl);
+    console.log('📸 Make screenshots Prod: ' + obj.prodUrl + ' and Stage:' + obj.migratedUrl);
 
     // Send the chunk to the worker
     worker.send(obj);    
@@ -77,8 +77,6 @@ for (let i = 0; i < numWorkers; i++) {
 
         // If all workers are done, output the result
         if (results.length === urls.length) {
-          generateHtmlReport(results);
-
           console.log('✅ Processing complete:', results);        
         }
         

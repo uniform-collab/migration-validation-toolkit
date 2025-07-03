@@ -31,7 +31,21 @@ async function doWork(obj) {
 
     try {
         if (!fs.existsSync(prodImgPath) || !fs.existsSync(stageImgPath)) {
-            const log = `One or both images do not exist: ${prodImgPath}, ${stageImgPath}`;
+            const log = `Production images do not exist: ${prodImgPath}`;
+            console.error(`🆘 ${log}`);
+            return {
+                url: prodUrl,
+                prodImg: path.relative(outputDir, prodImgPath),
+                stageImg: path.relative(outputDir, stageImgPath),
+                diffImg: null,
+                match: false,
+                mismatch: null,
+                log
+            };
+        }
+
+        if (!fs.existsSync(stageImgPath)) {
+            const log = `Target images do not exist: ${stageImgPath}`;
             console.error(`🆘 ${log}`);
             return {
                 url: prodUrl,
