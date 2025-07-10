@@ -152,7 +152,7 @@ function generateXmlReport(results) {
         const tag = result.tag ?? 'unclassified';
         const testCase = {
           "@name": `[${tag}]: ${result.url}`,
-          "@classname": "ScreenshotComparison",
+          "@classname": `${tag}`,
           properties: {
             property: [
               { "@name": "mismatchTag", "@value": result.tag ?? "undefined" },
