@@ -22,9 +22,9 @@ async function doWork(obj) {
 
     const diffDir = path.join(outputDir, "diffs");
 
-    const prodImgPath = path.join(screenshotsProdDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}.png`);
-    const stageImgPath = path.join(screenshotsMigratedDir, `${getFileName(migratedUrl ?? throwError('migratedUrl'))}.png`);
-    const diffImgPath = path.join(diffDir, `${getFileName(prodUrl)}.png`);
+    const prodImgPath = path.join(screenshotsProdDir, `prod_${getFileName(prodUrl ?? throwError('prodUrl'))}.png`);
+    const stageImgPath = path.join(screenshotsMigratedDir, `migrated_${getFileName(migratedUrl ?? throwError('migratedUrl'))}.png`);
+    const diffImgPath = path.join(diffDir, `diff_${getFileName(prodUrl)}.png`);
 
     fs.mkdirSync(diffDir, { recursive: true });
 

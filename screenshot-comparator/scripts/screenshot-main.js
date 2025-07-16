@@ -40,8 +40,8 @@ for (let i = 0; i < numWorkers; i++) {
     const prodUrl = chunk[j];
     const migratedUrl = prodUrl.replace(env("PROD_WEBSITE_URL"), env("STAGE_WEBSITE_URL"));
 
-    const prodImgPath = path.join(screenshotsProdDir, `${getFileName(prodUrl ?? throwError('prodUrl'))}.png`);
-    const migratedImgPath = path.join(screenshotsMigratedDir, `${getFileName(migratedUrl ?? throwError('migratedUrl'))}.png`);
+    const prodImgPath = path.join(screenshotsProdDir, `prod_${getFileName(prodUrl ?? throwError('prodUrl'))}.png`);
+    const migratedImgPath = path.join(screenshotsMigratedDir, `migrated_${getFileName(migratedUrl ?? throwError('migratedUrl'))}.png`);
 
     if (fs.existsSync(prodImgPath) && fs.existsSync(migratedImgPath)){
       continue;
