@@ -37,7 +37,7 @@ async function doWork(obj) {
         }
 
         if (!fs.existsSync(migratedImgPath)) {
-            await preparePage(context, migratedUrl, migratedImgPath);
+            await preparePage(context, migratedUrl, migratedImgPath, true);
             console.log(`🟨 Screenshot taken for migrated URL: ${migratedUrl}`);
         } else {
             console.log(`🟨 Screenshot already exists for migrated URL: ${migratedUrl}`);
@@ -52,8 +52,15 @@ async function doWork(obj) {
     }
 }
 
-async function preparePage(context, url, imgPath) {
+async function preparePage(context, url, imgPath, isStage = false) {
     const page = await context.newPage();
+
+    if (isStage && process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+        await page.setExtraHTTPHeaders({
+            'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+            'x-vercel-set-bypass-cookie': 'true'
+        });
+    }
 
     const parsedUrl = new URL(url);
     const searchTerm = parsedUrl.searchParams.get('searchTerm');
