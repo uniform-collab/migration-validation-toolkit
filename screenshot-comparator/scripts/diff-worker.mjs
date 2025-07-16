@@ -17,9 +17,8 @@ process.on('message', async (obj) => {
 async function doWork(obj) {
     const { outputDir, prodUrl, migratedUrl } = obj;
 
-    const screenshotsDir = "./.screenshots";
-    const screenshotsProdDir = path.join(screenshotsDir, "prod");
-    const screenshotsMigratedDir = path.join(screenshotsDir, "migrated");
+    const screenshotsProdDir = path.join(outputDir, "prod");
+    const screenshotsMigratedDir = path.join(outputDir, "migrated");
 
     const diffDir = path.join(outputDir, "diffs");
 

@@ -12,7 +12,7 @@ const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
 const urls = JSON.parse(fs.readFileSync('./.temp/urls.json', { encoding: 'utf8'}));
 
 // Output directories
-const outputDir = "./.screenshots";
+const outputDir = "./.comparison_results";
 if(!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }

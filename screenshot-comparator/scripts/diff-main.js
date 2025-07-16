@@ -165,22 +165,31 @@ function generateXmlReport(results) {
         };
 
         if (!result.match) {
-          testCase.failure = {
+           testCase.failure = {
             "@message": "Visual mismatch detected",
             "#": `Mismatch: ${result.mismatch?.toFixed(2) ?? "unknown"}%. ${
               result.log ?? ""
             }`.trim(),
           };
 
-          if (result.diffImg) {
-            const relativePath = path.relative(
-              outputDir,
-              path.join(outputDir, result.diffImg)
-            );
+          const attachments = [
+            { label: "PROD", path: result.prodImg },
+            { label: "STAGE", path: result.stageImg },
+            { label: "DIFF", path: result.diffImg },
+          ].filter(item => item.path);
+
+          if (attachments.length > 0) {
+            const attachmentBlock = attachments
+              .map(item =>
+                `[[ATTACHMENT|${path.relative(
+                  outputDir,
+                  path.join(outputDir, item.path)
+                )}]]`
+              )
+              .join('\n');
+
             testCase["system-out"] = {
-              "#": `<![CDATA[
-                    [[ATTACHMENT|${relativePath}]]
-                    ]]>`,
+              "#": `<![CDATA[\n${attachmentBlock}\n]]>`,
             };
           }
         }
