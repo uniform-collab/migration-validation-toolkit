@@ -74,6 +74,15 @@ try {
     }
   });
 
+  var products = entries.filter(
+    (e) => e.type === "HardGoodDetail"
+  );
+  console.log(`Found ${products.length} products.`);
+  products.forEach((product) => {
+    const url = `${process.env.PROD_WEBSITE_URL}search?searchTerm=${product.productTitle}`;
+    urls.add(url);
+  });
+
   const a = Array.from(urls);
   console.log(`Urls count: ${a.length}`);
   a.sort();

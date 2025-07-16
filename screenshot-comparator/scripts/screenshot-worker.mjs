@@ -18,7 +18,8 @@ process.on('message', async (obj) => {
 
 async function doWork(obj) {
     const { prodUrl, migratedUrl, prodImgPath, migratedImgPath } = obj;
-   
+
+    //const browser = await chromium.launch({ headless: false, slowMo: 100 });
     const browser = await chromium.launch();
     const context = await browser.newContext({
         viewport: { width: 1280, height: 720 },
@@ -26,34 +27,14 @@ async function doWork(obj) {
    
     try {
         if (!fs.existsSync(prodImgPath)) {
-            const prodPage = await context.newPage();
-            await retryWithBackoff(() =>
-                prodPage.goto(prodUrl, { waitUntil: 'networkidle', timeout: 90000 })
-            );
-            await freezeAnimations(prodPage);
-            await prodPage.screenshot({ path: prodImgPath, fullPage: true });
-            await prodPage.close();
+            await preparePage(context, prodUrl, prodImgPath);
             console.log(`🟦 Screenshot taken for production URL: ${prodUrl}`);
         } else {
             console.log(`🟦 Screenshot already exists for production URL: ${prodUrl}`);
         }
 
         if (!fs.existsSync(migratedImgPath)) {
-            const stagePage = await context.newPage();
-
-            if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-                await stagePage.setExtraHTTPHeaders({
-                    'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
-                    'x-vercel-set-bypass-cookie': 'true'
-                });
-            }
-
-            await retryWithBackoff(() =>
-                stagePage.goto(migratedUrl, { waitUntil: 'networkidle', timeout: 90000 })
-            );
-            await freezeAnimations(stagePage);
-            await stagePage.screenshot({ path: migratedImgPath, fullPage: true });
-            await stagePage.close();
+            await preparePage(context, migratedUrl, migratedImgPath);
             console.log(`🟨 Screenshot taken for migrated URL: ${migratedUrl}`);
         } else {
             console.log(`🟨 Screenshot already exists for migrated URL: ${migratedUrl}`);
@@ -66,6 +47,39 @@ async function doWork(obj) {
     } finally {
         await browser.close();
     }
+}
+
+async function preparePage(context, url, imgPath) {
+    const page = await context.newPage();
+
+    const parsedUrl = new URL(url);
+    const searchTerm = parsedUrl.searchParams.get('searchTerm');
+    
+    if (searchTerm) {
+        parsedUrl.searchParams.delete('searchTerm');
+        const cleanUrl = parsedUrl.toString();
+
+        await retryWithBackoff(() =>
+            page.goto(cleanUrl, { waitUntil: 'load', timeout: 90000 })
+        );
+
+        console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
+
+        await page.waitForSelector('input[placeholder="What can we help you find?"]', { timeout: 2000 });
+        await page.fill('input[placeholder="What can we help you find?"]', searchTerm);
+
+        await page.click('button[aria-label="search-button"]');
+        await page.waitForTimeout(2000);
+        console.log(`✅ Search completed for "${searchTerm}"`);
+    }else{
+      await retryWithBackoff(() =>
+          page.goto(url, { waitUntil: 'networkidle', timeout: 90000 })
+      );
+    }
+
+    await freezeAnimations(page);
+    await page.screenshot({ path: imgPath, fullPage: true });
+    await page.close();
 }
 
 async function freezeAnimations(page) {
