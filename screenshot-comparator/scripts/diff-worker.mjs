@@ -30,7 +30,7 @@ async function doWork(obj) {
     fs.mkdirSync(diffDir, { recursive: true });
 
     try {
-        if (!fs.existsSync(prodImgPath) || !fs.existsSync(stageImgPath)) {
+        if (!fs.existsSync(prodImgPath)) {
             const log = `Production images do not exist: ${prodImgPath}`;
             console.error(`🆘 ${log}`);
             return {

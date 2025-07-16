@@ -3,6 +3,9 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { env, retryWithBackoff } from "./utils.js";
+import sharp from 'sharp';
+import { rename } from 'fs/promises';
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -80,6 +83,36 @@ async function preparePage(context, url, imgPath) {
     await freezeAnimations(page);
     await page.screenshot({ path: imgPath, fullPage: true });
     await page.close();
+
+    await cropImageHeightIfNeeded(imgPath, 9000);
+}
+
+async function cropImageHeightIfNeeded(imgPath, maxHeight = 3000) {
+  try {
+    const image = sharp(imgPath);
+    const metadata = await image.metadata();
+
+    if (metadata.height > maxHeight) {
+      const tmpPath = imgPath + '.tmp';
+
+      await image
+        .extract({
+          left: 0,
+          top: 0,
+          width: metadata.width,
+          height: maxHeight,
+        })
+        .toFile(tmpPath);
+
+      await rename(tmpPath, imgPath);
+
+      console.log(`✂️ Cropped ${imgPath} to max height ${maxHeight}px`);
+    } else {
+      console.log(`✅ No cropping needed for ${imgPath} (height: ${metadata.height}px)`);
+    }
+  } catch (err) {
+    console.warn(`⚠️ Failed to crop ${imgPath}: ${err.message}`);
+  }
 }
 
 async function freezeAnimations(page) {
