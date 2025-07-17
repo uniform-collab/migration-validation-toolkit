@@ -79,7 +79,7 @@ try {
   );
   console.log(`Found ${products.length} products.`);
   products.forEach((product) => {
-    const url = `${process.env.PROD_WEBSITE_URL}search?searchTerm=${product.productTitle}`;
+    const url = `${process.env.PROD_WEBSITE_URL}search?searchTerm=${product.slug}`;
     urls.add(url);
   });
 

@@ -44,6 +44,6 @@ else
     
   console.log('Saving entries to entries.json');
   try { fs.mkdirSync('data', { recursive: true }); } catch {}
-  fs.writeFileSync('data/entries.json', JSON.stringify(entries.map(x => ({ id: x.entry._id, name: x.entry._name.replace(/\n/g, ''), type: x.entry.type, slug: x.entry._slug, productTitle: x.entry.fields.productTitle?.value })), null, 2), 'utf-8');
+  fs.writeFileSync('data/entries.json', JSON.stringify(entries.map(x => ({ id: x.entry._id, name: x.entry._name.replace(/\n/g, ''), type: x.entry.type, slug: x.entry._slug })), null, 2), 'utf-8');
   console.log('Saving completed');
 }
