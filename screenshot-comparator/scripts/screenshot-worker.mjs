@@ -70,7 +70,7 @@ async function preparePage(context, url, imgPath, isStage = false) {
         const cleanUrl = parsedUrl.toString();
 
         await retryWithBackoff(() =>
-            page.goto(cleanUrl, { waitUntil: 'load', timeout: 90000 })
+            page.goto(cleanUrl, { waitUntil: 'load', timeout: process.env.PLAYWRIGHT_TIMEOUT ? parseInt(process.env.PLAYWRIGHT_TIMEOUT) : 90000 })
         );
 
         console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
@@ -83,7 +83,7 @@ async function preparePage(context, url, imgPath, isStage = false) {
         console.log(`✅ Search completed for "${searchTerm}"`);
     }else{
       await retryWithBackoff(() =>
-          page.goto(url, { waitUntil: 'networkidle', timeout: 90000 })
+          page.goto(url, { waitUntil: 'networkidle', timeout: process.env.PLAYWRIGHT_TIMEOUT ? parseInt(process.env.PLAYWRIGHT_TIMEOUT) : 90000 })
       );
     }
 
