@@ -57,7 +57,6 @@ for (let i = 0; i < numWorkers; i++) {
           );
 
           if (results.length === urls.length) {
-            generateHtmlReport(results);
             generateXmlReport(results);
             console.log(
               "✅ Processing complete. Results saved to " + outputDir
@@ -86,112 +85,61 @@ for (let i = 0; i < numWorkers; i++) {
   }
 }
 
-function generateHtmlReport(results) {
-  const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-  <title>Visual Comparison Report</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background-color: #f2f2f2; }
-    img { max-width: 300px; }
-  </style>
-</head>
-<body>
-  <h1>Visual Comparison Report</h1>
-  <table>
-    <tr>
-      <th>URL</th>
-      <th>Production</th>
-      <th>Staging</th>
-      <th>Difference</th>
-      <th>Footer Difference</th>
-      <th>Mismatch %</th>
-      <th>Tag</th>
-      <th>Status</th>
-    </tr>
-    ${results
-      .map(
-        (result) => `
-    <tr>
-      <td>${result.url}</td>
-      <td><img src='${result.prodImg}' /></td>
-      <td><img src='${result.stageImg}' /></td>
-      <td>${
-        result.diffImg ? `<img src='${result.diffImg}' />` : "No Difference"
-      }</td>
-      <td>${
-        result.footerDiffImg
-          ? `<img src='${result.footerDiffImg}' />`
-          : "No Difference"
-      }</td>
-      <td>${
-        result.mismatch != null ? result.mismatch.toFixed(2) + "%" : "—"
-      }</td>
-      <td>${result.tag ?? "—"}</td>
-      <td>${result.match ? "Match" : "Mismatch"}</td>
-    </tr>`
-      )
-      .join("")}
-  </table>
-</body>
-</html>`;
-
-  fs.writeFileSync(path.join(outputDir, "report.html"), htmlContent);
-}
-
 function generateXmlReport(results) {
   const testSuite = {
     testsuite: {
       "@name": "Visual Regression",
       "@tests": results.length,
-      "@failures": results.filter((r) => !r.match).length,
+      "@failures": results.filter((r) => r.components?.some(c => !c.match)).length,
       testcase: results.map((result) => {
-        const tag = result.tag ?? 'unclassified';
+        const mismatchOverall = result.mismatch?.toFixed(2) ?? "NaN";
+        const tag = result.tag ?? "unclassified";
+        const hasFailure = result.components?.some(c => !c.match);
+
+        const attachments = result.components
+          .flatMap(component => {
+            const out = [];
+            if (component.prodImg)
+              out.push({ label: `${component.component} PROD`, path: component.prodImg });
+            if (component.stageImg)
+              out.push({ label: `${component.component} STAGE`, path: component.stageImg });
+            if (component.diffImg)
+              out.push({ label: `${component.component} DIFF`, path: component.diffImg });
+            return out;
+          });
+
+        const attachmentBlock = attachments
+          .map(item => `[[ATTACHMENT|${path.relative(outputDir, path.join(outputDir, item.path))}]]`)
+          .join('\n');
+
+        const tableText = result.components
+          .map(c => {
+            return `• ${c.component}: ${c.mismatch != null ? c.mismatch.toFixed(2) + "%" : "N/A"} ${c.tag ? `[${c.tag}]` : ""}`;
+          })
+          .join('\n');
+
         const testCase = {
           "@name": `[${tag}]: ${result.url}`,
           "@classname": `${tag}`,
           properties: {
             property: [
               { "@name": "mismatchTag", "@value": result.tag ?? "undefined" },
-              {
-                "@name": "mismatchPercentage",
-                "@value": result.mismatch?.toFixed(2) ?? "NaN",
-              },
+              { "@name": "mismatchPercentage", "@value": mismatchOverall },
             ],
           },
         };
 
-        if (!result.match) {
-           testCase.failure = {
-            "@message": "Visual mismatch detected",
-            "#": `Mismatch: ${result.mismatch?.toFixed(2) ?? "unknown"}%. ${
-              result.log ?? ""
-            }`.trim(),
+        if (hasFailure) {
+          testCase.failure = {
+            "@message": `Visual mismatch detected for ${result.url}`,
+            "#": `Overall mismatch: ${mismatchOverall}%. See details below.`,
           };
+        }
 
-          const attachments = [
-            { label: "PROD", path: result.prodImg },
-            { label: "STAGE", path: result.stageImg },
-            { label: "DIFF", path: result.diffImg },
-          ].filter(item => item.path);
-
-          if (attachments.length > 0) {
-            const attachmentBlock = attachments
-              .map(item =>
-                `[[ATTACHMENT|${path.relative(
-                  outputDir,
-                  path.join(outputDir, item.path)
-                )}]]`
-              )
-              .join('\n');
-
-            testCase["system-out"] = {
-              "#": `<![CDATA[\n${attachmentBlock}\n]]>`,
-            };
-          }
+        if (attachmentBlock || tableText) {
+          testCase["system-out"] = {
+            "#": `<![CDATA[\n${tableText}\n\n${attachmentBlock}\n]]>`,
+          };
         }
 
         return testCase;

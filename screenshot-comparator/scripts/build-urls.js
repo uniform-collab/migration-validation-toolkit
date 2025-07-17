@@ -86,6 +86,7 @@ try {
   const a = Array.from(urls);
   console.log(`Urls count: ${a.length}`);
   a.sort();
+  try { fs.mkdirSync('.temp', { recursive: true }); } catch {}
   fs.writeFileSync("./.temp/urls.json", JSON.stringify(a, null, 2), {
     encoding: "utf8",
   });
