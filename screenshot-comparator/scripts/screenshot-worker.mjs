@@ -75,7 +75,7 @@ async function preparePage(context, url, imgPath, isStage = false) {
 
         console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
 
-        await page.waitForSelector('input[placeholder="What can we help you find?"]', { timeout: 2000 });
+        await page.waitForSelector('input[placeholder="What can we help you find?"]', { timeout: 10000 });
         await page.fill('input[placeholder="What can we help you find?"]', searchTerm);
 
         await page.click('button[aria-label="search-button"]');
