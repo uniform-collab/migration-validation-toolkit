@@ -95,6 +95,8 @@ async function screenshotPageComponents(
           : 90000,
       })
     );
+    
+    await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
   }
 
   await freezeAnimations(page);
@@ -130,7 +132,7 @@ async function getComponentSelectors(page) {
           current.nodeType === 1 &&
           !isFixed(current)
         ) {
-          const uniqueSelector = `div-${index}`;
+          const uniqueSelector = `div-${String(index).padStart(2, "0")}`;
           current.setAttribute("data-component-id", uniqueSelector);
           selectors.push({
             name: uniqueSelector,
@@ -176,7 +178,7 @@ async function screenshotComponents(page, components, outputDir, isStage) {
 
       const filePath = path.join(
         outputDir,
-        `${isStage ? "migrated_" : "prod_"}${comp.name}.png`
+        `${comp.name}${isStage ? "_migrated" : "_prod"}.png`
       );
 
       await element.screenshot({ path: filePath, clip: roundedBox });

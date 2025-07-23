@@ -29,20 +29,16 @@ async function doWork(obj) {
   fs.mkdirSync(diffFolder, { recursive: true });
 
   const prodFiles = fs.existsSync(prodFolder)
-    ? fs
-        .readdirSync(prodFolder)
-        .filter((f) => f.startsWith("prod_") && f.endsWith(".png"))
+    ? fs.readdirSync(prodFolder).filter((f) => f.endsWith("_prod.png"))
     : [];
 
   const migratedFiles = fs.existsSync(migratedFolder)
-    ? fs
-        .readdirSync(migratedFolder)
-        .filter((f) => f.startsWith("migrated_") && f.endsWith(".png"))
+    ? fs.readdirSync(migratedFolder).filter((f) => f.endsWith("_migrated.png"))
     : [];
 
-  const prodComponentNames = prodFiles.map((f) => f.replace(/^prod_/, ""));
+  const prodComponentNames = prodFiles.map((f) => f.replace(/_prod\.png$/, ""));
   const migratedComponentNames = migratedFiles.map((f) =>
-    f.replace(/^migrated_/, "")
+    f.replace(/_migrated\.png$/, "")
   );
 
   const allComponentNames = new Set([
@@ -56,12 +52,12 @@ async function doWork(obj) {
 
   try {
     for (const componentName of allComponentNames) {
-      const prodImgPath = path.join(prodFolder, `prod_${componentName}`);
+      const prodImgPath = path.join(prodFolder, `${componentName}_prod.png`);
       const stageImgPath = path.join(
         migratedFolder,
-        `migrated_${componentName}`
+        `${componentName}_migrated.png`
       );
-      const diffImgPath = path.join(diffFolder, `diff_${componentName}`);
+      const diffImgPath = path.join(diffFolder, `${componentName}_diff.png`);
 
       const prodExists = fs.existsSync(prodImgPath);
       const stageExists = fs.existsSync(stageImgPath);
@@ -108,7 +104,7 @@ async function doWork(obj) {
         prodImgPath,
         stageImgPath,
         diffImgPath
-      );      
+      );
 
       if (!isNaN(mismatch) && height > 0) {
         totalWeightedMismatch += mismatch * height;
