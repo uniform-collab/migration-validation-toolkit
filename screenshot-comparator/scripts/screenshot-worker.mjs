@@ -162,9 +162,7 @@ async function screenshotComponents(page, components, outputDir, isStage) {
       const box = await element.boundingBox();
       if (!box || box.width === 0 || box.height === 0) {
         console.warn(
-          `⚠️ Skipping invisible component: ${comp.name} width: ${
-            box ? box.width : "N/A"
-          }, height: ${box ? box.height : "N/A"}`
+          `⚠️ Skipping invisible component: ${comp.name}, width: ${box ? box.width : "N/A"}, height: ${box ? box.height : "N/A"}`
         );
         continue;
       }
@@ -181,8 +179,35 @@ async function screenshotComponents(page, components, outputDir, isStage) {
         `${comp.name}${isStage ? "_migrated" : "_prod"}.png`
       );
 
+      // Scroll component into view to trigger lazy loading
+      await element.evaluate((el) =>
+        el.scrollIntoView({ behavior: "auto", block: "center" })
+      );
+
+      // Give the browser some time to render any lazy-loaded content
+      await page.waitForTimeout(500);
+
+      // Wait until all images within the component are fully loaded
+      await element.evaluate(async (el) => {
+        const images = el.querySelectorAll("img");
+        await Promise.all(
+          Array.from(images).map((img) => {
+            if (img.complete) return Promise.resolve();
+            return new Promise((resolve) => {
+              img.onload = () => resolve();
+              img.onerror = () => resolve();
+            });
+          })
+        );
+      });
+
+      // Final buffer before capture for extra stability
+      await page.waitForTimeout(300);
+
+      // Capture the screenshot
       await element.screenshot({ path: filePath, clip: roundedBox });
 
+      // Crop height if necessary
       await cropImageHeightIfNeeded(filePath, 9000);
 
       console.log(`📸 Component screenshot saved: ${filePath}`);
