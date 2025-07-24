@@ -34,9 +34,7 @@ async function doWork(obj) {
     ? fs.readdirSync(migratedFolder).filter((f) => f.endsWith("_migrated.png"))
     : [];
 
-  const prodComponentNames = prodFiles.map((f) =>
-    f.replace(/_prod\.png$/, "")
-  );
+  const prodComponentNames = prodFiles.map((f) => f.replace(/_prod\.png$/, ""));
   const migratedComponentNames = migratedFiles.map((f) =>
     f.replace(/_migrated\.png$/, "")
   );
@@ -52,6 +50,42 @@ async function doWork(obj) {
   let hasDiffImages = false;
 
   try {
+    const prodRedirectPath = path.join(prodFolder, "redirect.txt");
+    const migratedRedirectPath = path.join(migratedFolder, "redirect.txt");
+
+    const prodFinalUrl = fs.existsSync(prodRedirectPath)
+      ? fs.readFileSync(prodRedirectPath, "utf8").trim()
+      : prodUrl;
+    const migratedFinalUrl = fs.existsSync(migratedRedirectPath)
+      ? fs.readFileSync(migratedRedirectPath, "utf8").trim()
+      : migratedUrl;
+
+    if (stripDomain(prodFinalUrl) !== stripDomain(migratedFinalUrl)) {
+      console.warn(
+        `🚨 Redirect mismatch: PROD → ${prodFinalUrl}, MIGRATED → ${migratedFinalUrl}`
+      );
+
+      for (const componentName of allComponentNames) {
+        results.push({
+          component: componentName,
+          prodImg: null,
+          stageImg: null,
+          diffImg: null,
+          match: false,
+          mismatch: 100.0,
+          tag: "redirect-url-mismatch",
+          log: `🔀 Redirected URLs are different: ${prodFinalUrl} vs ${migratedFinalUrl}`,
+        });
+      }
+
+      return {
+        url: prodUrl,
+        mismatch: 100.0,
+        tag: "redirect-url-mismatch",
+        components: results,
+      };
+    }
+
     for (const componentName of allComponentNames) {
       const prodImgPath = path.join(prodFolder, `${componentName}_prod.png`);
       const stageImgPath = path.join(
@@ -145,6 +179,15 @@ async function doWork(obj) {
   } catch (error) {
     console.error(`❌ Error processing ${prodUrl}:`, error);
     return null;
+  }
+}
+
+function stripDomain(url) {
+  try {
+    const u = new URL(url);
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return url;
   }
 }
 

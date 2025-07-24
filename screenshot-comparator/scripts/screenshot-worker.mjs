@@ -103,6 +103,15 @@ async function screenshotPageComponents(
     await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
   }
 
+  const finalUrl = page.url();
+  const redirected = finalUrl !== url;
+
+  if (redirected) {
+    console.warn(`⛔ Redirect detected: ${url} → ${finalUrl}`);
+    const redirectFile = path.join(componentDir, "redirect.txt");
+    fs.writeFileSync(redirectFile, finalUrl, { encoding: "utf8" });
+  }
+
   await freezeAnimations(page);
 
   const componentDir = path.join(baseDir, encodeURLToFolder(url));
