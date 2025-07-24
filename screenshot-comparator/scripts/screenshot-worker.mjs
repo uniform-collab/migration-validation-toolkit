@@ -1,27 +1,55 @@
 import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
-import { env, retryWithBackoff } from "./utils.js";
+import { env, retryWithBackoff, gotoWithHardTimeout } from "./utils.js";
 import dotenv from "dotenv";
 import sharp from "sharp";
 dotenv.config();
 
-process.on("SIGTERM", () => {
+// Shared browser and context reused across tasks
+const browser = await chromium.launch();
+
+const PLAYWRIGHT_TIMEOUT = process.env.PLAYWRIGHT_TIMEOUT
+  ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
+  : 90000;
+
+process.on("SIGTERM", async () => {
   console.log("Worker received termination signal. Cleaning up...");
+  await browser.close();
   process.exit(0);
 });
 
 process.on("message", async (obj) => {
-  process.send(await doWork(obj));
-});
-
-async function doWork(obj) {
-  const { prodUrl, migratedUrl, prodOnly, migratedOnly } = obj;
-
-  const browser = await chromium.launch();
+  const start = Date.now();
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
   });
+
+  let result = false;
+  try {
+    result = await Promise.race([
+      doWork(obj, context),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("💣 Global task timeout (e.g. 2.5 min)")),
+          150_000
+        )
+      ),
+    ]);
+  } catch (err) {
+    console.error(`🆘 Worker error:`, err);
+  } finally {
+    const duration = ((Date.now() - start) / 1000).toFixed(1);
+    console.log(
+      result ? `✅ Task done (${duration}s)` : `🆘 Task failed (${duration}s)`
+    );
+    await context.close();
+    process.send(result);
+  }
+});
+
+async function doWork(obj, context) {
+  const { prodUrl, migratedUrl, prodOnly, migratedOnly } = obj;
 
   try {
     if (!migratedOnly) {
@@ -43,8 +71,6 @@ async function doWork(obj) {
   } catch (error) {
     console.error(`🆘 Error processing ${prodUrl}:`, error);
     return false;
-  } finally {
-    await browser.close();
   }
 }
 
@@ -54,73 +80,85 @@ async function screenshotPageComponents(
   baseDir,
   isStage = false
 ) {
+  const componentDir = path.join(baseDir, encodeURLToFolder(url));
+  if (fs.existsSync(componentDir)) {
+    console.log(`📂 Skipping existing directory: ${componentDir}`);
+    return;
+  }
+
   const page = await context.newPage();
 
-  if (isStage && process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-    await page.setExtraHTTPHeaders({
-      "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
-      "x-vercel-set-bypass-cookie": "true",
-    });
+  try {
+    if (isStage && process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+      await page.setExtraHTTPHeaders({
+        "x-vercel-protection-bypass":
+          process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+        "x-vercel-set-bypass-cookie": "true",
+      });
+    }
+
+    const parsedUrl = new URL(url);
+    const searchTerm = parsedUrl.searchParams.get("searchTerm");
+
+    if (searchTerm) {
+      parsedUrl.searchParams.delete("searchTerm");
+      const cleanUrl = parsedUrl.toString();
+      await retryWithBackoff(
+        () =>
+          page.goto(cleanUrl, {
+            waitUntil: "load",
+            timeout: PLAYWRIGHT_TIMEOUT,
+          }),
+        1,
+        5000,
+        PLAYWRIGHT_TIMEOUT
+      );
+
+      console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
+      await page.waitForSelector(
+        'input[placeholder="What can we help you find?"]',
+        { timeout: 10000 }
+      );
+      await page.fill(
+        'input[placeholder="What can we help you find?"]',
+        searchTerm
+      );
+      await page.click('button[aria-label="search-button"]');
+      await page.waitForTimeout(10000);
+    } else {
+      await retryWithBackoff(
+        () =>
+          page.goto(url, {
+            waitUntil: "networkidle",
+            timeout: PLAYWRIGHT_TIMEOUT,
+          }),
+        1,
+        5000,
+        PLAYWRIGHT_TIMEOUT
+      );
+
+      await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
+    }
+
+    const finalUrl = page.url();
+    const redirected = finalUrl !== url;
+
+    const componentDir = path.join(baseDir, encodeURLToFolder(url));
+    fs.mkdirSync(componentDir, { recursive: true });
+
+    if (redirected) {
+      console.warn(`⛔ Redirect detected: ${url} → ${finalUrl}`);
+      const redirectFile = path.join(componentDir, "redirect.txt");
+      fs.writeFileSync(redirectFile, finalUrl, { encoding: "utf8" });
+    }
+
+    await freezeAnimations(page);
+
+    const components = await getComponentSelectors(page);
+    await screenshotComponents(url, page, components, componentDir, isStage);
+  } finally {
+    await page.close(); // always close the page
   }
-
-  const parsedUrl = new URL(url);
-  const searchTerm = parsedUrl.searchParams.get("searchTerm");
-
-  if (searchTerm) {
-    parsedUrl.searchParams.delete("searchTerm");
-    const cleanUrl = parsedUrl.toString();
-
-    await retryWithBackoff(() =>
-      page.goto(cleanUrl, {
-        waitUntil: "load",
-        timeout: process.env.PLAYWRIGHT_TIMEOUT
-          ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
-          : 90000,
-      })
-    );
-
-    console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
-    await page.waitForSelector(
-      'input[placeholder="What can we help you find?"]',
-      { timeout: 10000 }
-    );
-    await page.fill(
-      'input[placeholder="What can we help you find?"]',
-      searchTerm
-    );
-    await page.click('button[aria-label="search-button"]');
-    await page.waitForTimeout(10000);
-  } else {
-    await retryWithBackoff(() =>
-      page.goto(url, {
-        waitUntil: "networkidle",
-        timeout: process.env.PLAYWRIGHT_TIMEOUT
-          ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
-          : 90000,
-      })
-    );
-
-    await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
-  }
-
-  const finalUrl = page.url();
-  const redirected = finalUrl !== url;
-
-  if (redirected) {
-    console.warn(`⛔ Redirect detected: ${url} → ${finalUrl}`);
-    const redirectFile = path.join(componentDir, "redirect.txt");
-    fs.writeFileSync(redirectFile, finalUrl, { encoding: "utf8" });
-  }
-
-  await freezeAnimations(page);
-
-  const componentDir = path.join(baseDir, encodeURLToFolder(url));
-  fs.mkdirSync(componentDir, { recursive: true });
-
-  const components = await getComponentSelectors(page);
-  await screenshotComponents(page, components, componentDir, isStage);
-
-  await page.close();
 }
 
 async function getComponentSelectors(page) {
@@ -163,7 +201,7 @@ async function getComponentSelectors(page) {
   });
 }
 
-async function screenshotComponents(page, components, outputDir, isStage) {
+async function screenshotComponents(url, page, components, outputDir, isStage) {
   for (const comp of components) {
     try {
       const element = await page.$(comp.selector);
@@ -268,7 +306,10 @@ async function screenshotComponents(page, components, outputDir, isStage) {
 
       console.log(`📸 Component screenshot saved: ${filePath}`);
     } catch (err) {
-      console.error(`🆘 Failed to screenshot ${comp.name}:`, err.message);
+      console.error(
+        `🆘 Failed to screenshot ${comp.name} - ${url}:`,
+        err.message
+      );
     }
   }
 }

@@ -19,7 +19,7 @@ const screenshotsMigratedDir = path.join(outputDir, "migrated");
 fs.mkdirSync(screenshotsProdDir, { recursive: true });
 fs.mkdirSync(screenshotsMigratedDir, { recursive: true });
 
-const taskQueue = urls
+const rawQueue = urls
   .map((prodUrl) => {
     const migratedUrl = prodUrl.replace(
       env("PROD_WEBSITE_URL"),
@@ -34,61 +34,82 @@ const taskQueue = urls
       `migrated_${getFileName(migratedUrl)}.png`
     );
 
-    if (fs.existsSync(prodImgPath) && fs.existsSync(migratedImgPath))
-      return null;
-
-    return { prodUrl, migratedUrl, prodImgPath, migratedImgPath, prodOnly, migratedOnly };
+    return {
+      prodUrl,
+      migratedUrl,
+      prodImgPath,
+      migratedImgPath,
+      prodOnly,
+      migratedOnly,
+    };
   })
   .filter(Boolean);
 
-const numWorkers = process.env.PLAYWRIGHT_WORKERS ? parseInt(process.env.PLAYWRIGHT_WORKERS) : 4;
-const results = [];
+const totalTasks = rawQueue.length;
+const taskQueue = [...rawQueue];
 
-let activeWorkers = 0;
+const numWorkers = process.env.PLAYWRIGHT_WORKERS
+  ? parseInt(process.env.PLAYWRIGHT_WORKERS)
+  : 4;
+
 const workers = [];
+let results = [];
 
 for (let i = 0; i < numWorkers; i++) {
-  spawnWorker(i);
-}
-
-function spawnWorker(id) {
-  if (taskQueue.length === 0) return;
-
-  const job = taskQueue.shift();
   const worker = fork("./scripts/screenshot-worker.mjs");
-  activeWorkers++;
-  workers.push(worker);
-
-  console.log(`📸 Worker ${id} -> Prod: ${job.prodUrl}`);
-
-  worker.send(job);
+  workers.push({ id: i, process: worker, busy: false });
 
   worker.on("message", (result) => {
     results.push(result);
-    console.log(result ? `✅ Worker ${id} success` : `🆘 Worker ${id} failed`);
 
-    worker.kill("SIGTERM");
-    activeWorkers--;
+    const remaining = taskQueue.length;
+    const done = results.length;
+    const percent = ((done / totalTasks) * 100).toFixed(1);
 
-    if (taskQueue.length > 0) {
-      spawnWorker(id); // Запустить следующий таск на этом же worker ID
-    } else if (activeWorkers === 0) {
-      console.log(`✅ All tasks done. ${results.length} processed.`);
-    }
+    console.log(
+      result
+        ? `✅ Worker ${i} success (${remaining} left, ${percent}% done)`
+        : `🆘 Worker ${i} failed (${remaining} left, ${percent}% done)`
+    );
+
+    workers[i].busy = false;
+    assignNextTask(i);
   });
 
   worker.on("error", (err) => {
-    console.error(`❌ Worker ${id} error:`, err);
-    worker.kill("SIGTERM");
-    activeWorkers--;
-    spawnWorker(id);
+    console.error(`❌ Worker ${i} error:`, err);
+    workers[i].busy = false;
+    assignNextTask(i);
   });
 
   worker.on("exit", (code) => {
     if (code !== 0) {
-      console.warn(`⚠️ Worker ${id} exited with code ${code}`);
+      console.warn(`⚠️ Worker ${i} exited with code ${code}`);
     }
   });
+}
+
+function assignNextTask(workerId) {
+  if (taskQueue.length === 0) {
+    const allDone = workers.every((w) => !w.busy);
+    if (allDone) {
+      console.log(`🏁 All tasks completed. Total: ${results.length}`);
+      workers.forEach((w) => w.process.kill("SIGTERM"));
+    }
+    return;
+  }
+
+  const task = taskQueue.shift();
+  if (task) {
+    workers[workerId].busy = true;
+    console.log(`📸 Worker ${workerId} -> Prod: ${task.prodUrl}`);
+    workers[workerId].process.send(task);
+  }
+}
+
+// Start initial assignment
+for (let i = 0; i < workers.length; i++) {
+  assignNextTask(i);
 }
 
 function encodeURLToFilename(url) {
