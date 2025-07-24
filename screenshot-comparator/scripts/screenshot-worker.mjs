@@ -16,7 +16,7 @@ process.on("message", async (obj) => {
 });
 
 async function doWork(obj) {
-  const { prodUrl, migratedUrl } = obj;
+  const { prodUrl, migratedUrl, prodOnly, migratedOnly } = obj;
 
   const browser = await chromium.launch();
   const context = await browser.newContext({
@@ -24,17 +24,21 @@ async function doWork(obj) {
   });
 
   try {
-    await screenshotPageComponents(
-      context,
-      prodUrl,
-      ".comparison_results/prod"
-    );
-    await screenshotPageComponents(
-      context,
-      migratedUrl,
-      ".comparison_results/migrated",
-      true
-    );
+    if (!migratedOnly) {
+      await screenshotPageComponents(
+        context,
+        prodUrl,
+        ".comparison_results/prod"
+      );
+    }
+    if (!prodOnly) {
+      await screenshotPageComponents(
+        context,
+        migratedUrl,
+        ".comparison_results/migrated",
+        true
+      );
+    }
     return true;
   } catch (error) {
     console.error(`🆘 Error processing ${prodUrl}:`, error);

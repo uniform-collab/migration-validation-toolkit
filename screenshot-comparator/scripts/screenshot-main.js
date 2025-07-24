@@ -9,6 +9,9 @@ const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
 
 const urls = JSON.parse(fs.readFileSync("./.temp/urls.json", "utf8"));
 
+const prodOnly = process.argv.includes("--prod-only");
+const migratedOnly = process.argv.includes("--migrated-only");
+
 const outputDir = "./.comparison_results";
 const screenshotsProdDir = path.join(outputDir, "prod");
 const screenshotsMigratedDir = path.join(outputDir, "migrated");
@@ -34,7 +37,7 @@ const taskQueue = urls
     if (fs.existsSync(prodImgPath) && fs.existsSync(migratedImgPath))
       return null;
 
-    return { prodUrl, migratedUrl, prodImgPath, migratedImgPath };
+    return { prodUrl, migratedUrl, prodImgPath, migratedImgPath, prodOnly, migratedOnly };
   })
   .filter(Boolean);
 

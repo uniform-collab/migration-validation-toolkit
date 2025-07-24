@@ -9,6 +9,8 @@
     "build:urls": "node ./scripts/build-urls.js",
     "crawl": "node ./scripts/crawl.js",
     "screenshots": "node ./scripts/screenshot-main.js",
+    "screenshots:prod-only": "node ./scripts/screenshot-main.js --prod-only",
+    "screenshots:migrated-only": "node ./scripts/screenshot-main.js --migrated-only",
     "diff": "node ./scripts/diff-main.js"
   },
   "author": "",
