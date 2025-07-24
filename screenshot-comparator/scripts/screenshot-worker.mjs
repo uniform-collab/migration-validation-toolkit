@@ -99,7 +99,7 @@ async function screenshotPageComponents(
           : 90000,
       })
     );
-    
+
     await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
   }
 
@@ -166,10 +166,41 @@ async function screenshotComponents(page, components, outputDir, isStage) {
       const box = await element.boundingBox();
       if (!box || box.width === 0 || box.height === 0) {
         console.warn(
-          `⚠️ Skipping invisible component: ${comp.name}, width: ${box ? box.width : "N/A"}, height: ${box ? box.height : "N/A"}`
+          `⚠️ Skipping invisible component: ${comp.name}, width: ${
+            box ? box.width : "N/A"
+          }, height: ${box ? box.height : "N/A"}`
         );
         continue;
       }
+
+      // ⛔ Hide all position: fixed elements (except the one we're capturing)
+      // ⛔ Also hide the header if current component is not header
+      await page.evaluate(
+        ({ selector, compName }) => {
+          const all = Array.from(document.body.querySelectorAll("*"));
+
+          const isHeaderComponent = compName === "header";
+          const header = document.querySelector("header");
+
+          all.forEach((el) => {
+            const style = window.getComputedStyle(el);
+            const isFixed = style.position === "fixed";
+            const isHeader = el === header;
+
+            if (
+              (isFixed || (!isHeaderComponent && isHeader)) &&
+              !el.matches(selector)
+            ) {
+              el.setAttribute(
+                "data-original-visibility",
+                el.style.visibility || ""
+              );
+              el.style.visibility = "hidden";
+            }
+          });
+        },
+        { selector: comp.selector, compName: comp.name }
+      );
 
       const roundedBox = {
         x: Math.floor(box.x),
@@ -213,6 +244,18 @@ async function screenshotComponents(page, components, outputDir, isStage) {
 
       // Crop height if necessary
       await cropImageHeightIfNeeded(filePath, 9000);
+
+      // ✅ Restore fixed elements
+      await page.evaluate(() => {
+        const allHidden = document.querySelectorAll(
+          "[data-original-visibility]"
+        );
+        allHidden.forEach((el) => {
+          const original = el.getAttribute("data-original-visibility");
+          el.style.visibility = original || "";
+          el.removeAttribute("data-original-visibility");
+        });
+      });
 
       console.log(`📸 Component screenshot saved: ${filePath}`);
     } catch (err) {

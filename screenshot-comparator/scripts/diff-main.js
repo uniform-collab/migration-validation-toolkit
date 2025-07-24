@@ -50,10 +50,10 @@ for (let i = 0; i < numWorkers; i++) {
 
           const mismatch =
             result?.mismatch != null ? ` (${result.mismatch.toFixed(2)}%)` : "";
+          const isSame = result?.match === true || result?.mismatch === 0;
+
           console.log(
-            `🧩 Diff result: ${
-              result?.match ? "✅ same" : "🆘 different"
-            }${mismatch}`
+            `🧩 Diff result: ${isSame ? "✅ same" : "🆘 different"}${mismatch}`
           );
 
           if (results.length === urls.length) {
@@ -86,37 +86,56 @@ for (let i = 0; i < numWorkers; i++) {
 }
 
 function generateXmlReport(results) {
+  const testCasesWithDiffs = results.filter((r) =>
+    r.components?.some((c) => !c.match)
+  );
+
   const testSuite = {
     testsuite: {
       "@name": "Visual Regression",
-      "@tests": results.length,
-      "@failures": results.filter((r) => r.components?.some(c => !c.match)).length,
-      testcase: results.map((result) => {
+      "@tests": testCasesWithDiffs.length,
+      "@failures": testCasesWithDiffs.length,
+      testcase: testCasesWithDiffs.map((result) => {
         const mismatchOverall = result.mismatch?.toFixed(2) ?? "NaN";
         const tag = result.tag ?? "unclassified";
-        const hasFailure = result.components?.some(c => !c.match);
 
-        const attachments = result.components
-          .flatMap(component => {
-            const out = [];
-            if (component.prodImg)
-              out.push({ label: `${component.component} PROD`, path: component.prodImg });
-            if (component.stageImg)
-              out.push({ label: `${component.component} STAGE`, path: component.stageImg });
-            if (component.diffImg)
-              out.push({ label: `${component.component} DIFF`, path: component.diffImg });
-            return out;
-          });
+        const attachments = result.components.flatMap((component) => {
+          const out = [];
+          if (component.prodImg)
+            out.push({
+              label: `${component.component} PROD`,
+              path: component.prodImg,
+            });
+          if (component.stageImg)
+            out.push({
+              label: `${component.component} STAGE`,
+              path: component.stageImg,
+            });
+          if (component.diffImg)
+            out.push({
+              label: `${component.component} DIFF`,
+              path: component.diffImg,
+            });
+          return out;
+        });
 
         const attachmentBlock = attachments
-          .map(item => `[[ATTACHMENT|${path.relative(outputDir, path.join(outputDir, item.path))}]]`)
-          .join('\n');
+          .map(
+            (item) =>
+              `[[ATTACHMENT|${path.relative(
+                outputDir,
+                path.join(outputDir, item.path)
+              )}]]`
+          )
+          .join("\n");
 
         const tableText = result.components
-          .map(c => {
-            return `• ${c.component}: ${c.mismatch != null ? c.mismatch.toFixed(2) + "%" : "N/A"} ${c.tag ? `[${c.tag}]` : ""}`;
+          .map((c) => {
+            return `• ${c.component}: ${
+              c.mismatch != null ? c.mismatch.toFixed(2) + "%" : "N/A"
+            } ${c.tag ? `[${c.tag}]` : ""}`;
           })
-          .join('\n');
+          .join("\n");
 
         const testCase = {
           "@name": `[${tag}]: ${result.url}`,
@@ -127,14 +146,11 @@ function generateXmlReport(results) {
               { "@name": "mismatchPercentage", "@value": mismatchOverall },
             ],
           },
-        };
-
-        if (hasFailure) {
-          testCase.failure = {
+          failure: {
             "@message": `Visual mismatch detected for ${result.url}`,
             "#": `Overall mismatch: ${mismatchOverall}%. See details below.`,
-          };
-        }
+          },
+        };
 
         if (attachmentBlock || tableText) {
           testCase["system-out"] = {

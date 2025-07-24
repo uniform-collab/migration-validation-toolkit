@@ -26,8 +26,6 @@ async function doWork(obj) {
   );
   const diffFolder = path.join(outputDir, "diffs", getFileName(prodUrl));
 
-  fs.mkdirSync(diffFolder, { recursive: true });
-
   const prodFiles = fs.existsSync(prodFolder)
     ? fs.readdirSync(prodFolder).filter((f) => f.endsWith("_prod.png"))
     : [];
@@ -36,7 +34,9 @@ async function doWork(obj) {
     ? fs.readdirSync(migratedFolder).filter((f) => f.endsWith("_migrated.png"))
     : [];
 
-  const prodComponentNames = prodFiles.map((f) => f.replace(/_prod\.png$/, ""));
+  const prodComponentNames = prodFiles.map((f) =>
+    f.replace(/_prod\.png$/, "")
+  );
   const migratedComponentNames = migratedFiles.map((f) =>
     f.replace(/_migrated\.png$/, "")
   );
@@ -45,10 +45,11 @@ async function doWork(obj) {
     ...prodComponentNames,
     ...migratedComponentNames,
   ]);
-  const results = [];
 
+  const results = [];
   let totalWeightedMismatch = 0;
   let totalHeight = 0;
+  let hasDiffImages = false;
 
   try {
     for (const componentName of allComponentNames) {
@@ -64,7 +65,6 @@ async function doWork(obj) {
 
       if (!prodExists && stageExists) {
         const height = await getImageHeight(stageImgPath);
-
         if (height > 0) {
           totalWeightedMismatch += 100.0 * height;
           totalHeight += height;
@@ -99,16 +99,23 @@ async function doWork(obj) {
         continue;
       }
 
-      // both exist → compare
-      const { match, mismatch, error } = await compareImages(
+      const { match, mismatch, diffBuffer, error } = await compareImages(
         prodImgPath,
-        stageImgPath,
-        diffImgPath
+        stageImgPath
       );
 
       if (!isNaN(mismatch) && height > 0) {
         totalWeightedMismatch += mismatch * height;
         totalHeight += height;
+      }
+
+      if (!match && diffBuffer) {
+        if (!hasDiffImages) {
+          fs.mkdirSync(diffFolder, { recursive: true }); // Create only when needed
+          hasDiffImages = true;
+        }
+        fs.writeFileSync(diffImgPath, diffBuffer);
+        console.log("📷 Diff image saved to:", diffImgPath);
       }
 
       results.push({
@@ -151,15 +158,11 @@ async function getImageHeight(imgPath) {
   }
 }
 
-async function compareImages(prodImgPath, stageImgPath, diffImgPath) {
+async function compareImages(prodImgPath, stageImgPath) {
   const prodBuffer = fs.readFileSync(prodImgPath);
   const stageBuffer = fs.readFileSync(stageImgPath);
 
-  console.log(
-    `🧪 Buffer sizes — prod: ${prodBuffer.length}, stage: ${stageBuffer.length}`
-  );
-
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     resemble(prodBuffer)
       .compareTo(stageBuffer)
       .ignoreAntialiasing()
@@ -173,9 +176,12 @@ async function compareImages(prodImgPath, stageImgPath, diffImgPath) {
       .onComplete((data) => {
         if (data.error) {
           console.error("❌ Resemble error:", data.error);
-          const mismatch = 100.0;
-          console.log(`📊 Mismatch percentage: ${mismatch.toFixed(2)}%`);
-          return resolve({ match: false, mismatch, error: data.error });
+          return resolve({
+            match: false,
+            mismatch: 100.0,
+            error: data.error,
+            diffBuffer: null,
+          });
         }
 
         let mismatch = parseFloat(data?.misMatchPercentage ?? "100.0");
@@ -186,12 +192,12 @@ async function compareImages(prodImgPath, stageImgPath, diffImgPath) {
 
         console.log(`📊 Mismatch percentage: ${mismatch.toFixed(2)}%`);
 
-        if (mismatch > 0 && typeof data.getBuffer === "function") {
-          fs.writeFileSync(diffImgPath, data.getBuffer());
-          console.log("📷 Diff image saved to:", diffImgPath);
-        }
+        const diffBuffer =
+          mismatch > 0 && typeof data.getBuffer === "function"
+            ? data.getBuffer()
+            : null;
 
-        resolve({ match: mismatch === 0, mismatch });
+        resolve({ match: mismatch === 0, mismatch, diffBuffer });
       });
   });
 }
@@ -213,15 +219,8 @@ function encodeURLToFilename(url) {
   );
 }
 
-function throwError(msg) {
-  throw new Error(msg);
-}
-
 function getDiffTag(mismatch) {
-  if (mismatch == null) {
-    return "not compared";
-  }
-
+  if (mismatch == null) return "not compared";
   if (mismatch === 0) return "perfect-match";
   if (mismatch <= 1) return "minor-diff";
   if (mismatch <= 5) return "medium-diff";
