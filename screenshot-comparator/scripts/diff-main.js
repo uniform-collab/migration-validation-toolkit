@@ -6,9 +6,11 @@ import { create } from "xmlbuilder2";
 import path from "path";
 dotenv.config();
 
-const urls = JSON.parse(
-  fs.readFileSync("./.temp/urls.json", { encoding: "utf8" })
-);
+const useSitemap = process.argv.includes("--sitemap");
+const urlsFilePath = useSitemap? "./.temp/urls-sitemap.json" : "./.temp/urls.json";
+console.log(`Using URLs from: ${urlsFilePath}`);
+const urls = JSON.parse(fs.readFileSync(urlsFilePath, "utf8"));
+
 const outputDir = "./.comparison_results";
 
 if (!fs.existsSync(outputDir)) {
@@ -22,11 +24,10 @@ const results = [];
 for (let i = 0; i < numWorkers; i++) {
   const chunk = urls.slice(i * chunkSize, (i + 1) * chunkSize);
   for (let j = 0; j < chunk.length; ++j) {
-    const prodUrl = chunk[j];
-    const migratedUrl = prodUrl.replace(
-      env("PROD_WEBSITE_URL"),
-      env("STAGE_WEBSITE_URL")
-    );
+    const relativeUrl = chunk[j];
+
+    const prodUrl = new URL(relativeUrl, env("PROD_WEBSITE_URL")).toString();
+    const migratedUrl = new URL(relativeUrl, env("STAGE_WEBSITE_URL")).toString();
 
     const obj = { outputDir, prodUrl, migratedUrl };
     console.log(

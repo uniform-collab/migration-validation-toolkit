@@ -44,14 +44,14 @@ try {
   console.log(`Filtered paths: ${updatedPaths.length} valid paths.`);
 
   const typeMapping = {
-    "articles": "articleDetail",
-    "conference": "conferencesDetail",
+    articles: "articleDetail",
+    conference: "conferencesDetail",
     "od-ls": "onlineTrainingDetail",
-    "webinars": "webinarsDetail",
+    webinars: "webinarsDetail",
     "od-ls-watch-page": "onlineTrainingDetail",
-    "hardGoodDetail": "hardGoodDetail",
-    "speaker": "personDetail"
-  }
+    hardGoodDetail: "hardGoodDetail",
+    speaker: "personDetail",
+  };
 
   updatedPaths.forEach((slug) => {
     ///articles/:articles
@@ -60,7 +60,9 @@ try {
       const entryType = spl[spl.length - 1].replace(/\/$/, "");
       const typeFromMapping = typeMapping[entryType];
       const entriesByType = entries.filter((e) => e.type === typeFromMapping);
-      console.log(`Found entries ${entriesByType.length} for type: ${entryType}`);
+      console.log(
+        `Found entries ${entriesByType.length} for type: ${entryType}`
+      );
       entriesByType.forEach((entry) => {
         const url = new URL(
           slug.replace(":" + entryType, entry.slug),
@@ -74,20 +76,29 @@ try {
     }
   });
 
-  var products = entries.filter(
-    (e) => e.type === "HardGoodDetail"
-  );
+  var products = entries.filter((e) => e.type === "HardGoodDetail");
   console.log(`Found ${products.length} products.`);
   products.forEach((product) => {
     const url = `${process.env.PROD_WEBSITE_URL}search?searchTerm=${product.slug}`;
     urls.add(url);
   });
 
-  const a = Array.from(urls);
-  console.log(`Urls count: ${a.length}`);
-  a.sort();
-  try { fs.mkdirSync('.temp', { recursive: true }); } catch {}
-  fs.writeFileSync("./.temp/urls.json", JSON.stringify(a, null, 2), {
+  const result = Array.from(urls);
+
+  const relativeUrls = result.map((u) => {
+    try {
+      return new URL(u).pathname;
+    } catch {
+      return u;
+    }
+  });
+
+  console.log(`Urls count: ${relativeUrls.length}`);
+  relativeUrls.sort();
+  try {
+    fs.mkdirSync(".temp", { recursive: true });
+  } catch {}
+  fs.writeFileSync("./.temp/urls.json", JSON.stringify(relativeUrls, null, 2), {
     encoding: "utf8",
   });
 

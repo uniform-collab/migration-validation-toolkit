@@ -6,12 +6,18 @@
   "scripts": {
     "start": "run 'crawl', then 'screenshot', then 'diff'",
     "collect-entries": "node scripts/entries.js",
+    "build:urls:diff": "node ./scripts/build-urls-diff.js",
     "build:urls": "node ./scripts/build-urls.js",
+    "build:urls:sitemap": "node ./scripts/build-urls-sitemap.js",
     "crawl": "node ./scripts/crawl.js",
     "screenshots": "node ./scripts/screenshot-main.js",
     "screenshots:prod-only": "node ./scripts/screenshot-main.js --prod-only",
     "screenshots:migrated-only": "node ./scripts/screenshot-main.js --migrated-only",
-    "diff": "node ./scripts/diff-main.js"
+    "screenshots:sitemap": "node ./scripts/screenshot-main.js --sitemap",
+    "screenshots:prod-only:sitemap": "node ./scripts/screenshot-main.js --prod-only --sitemap",
+    "screenshots:migrated-only:sitemap": "node ./scripts/screenshot-main.js --migrated-only --sitemap",
+    "diff": "node ./scripts/diff-main.js",
+    "diff:sitemap": "node ./scripts/diff-main.js --sitemap"
   },
   "author": "",
   "license": "ISC",
