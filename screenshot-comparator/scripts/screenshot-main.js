@@ -7,10 +7,13 @@ dotenv.config();
 
 const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
 
-const urls = JSON.parse(fs.readFileSync("./.temp/urls.json", "utf8"));
-
 const prodOnly = process.argv.includes("--prod-only");
 const migratedOnly = process.argv.includes("--migrated-only");
+
+const useSitemap = process.argv.includes("--sitemap");
+const urlsFilePath = useSitemap? "./.temp/urls-sitemap.json" : "./.temp/urls.json";
+console.log(`Using URLs from: ${urlsFilePath}`);
+const urls = JSON.parse(fs.readFileSync(urlsFilePath, "utf8"));
 
 const outputDir = "./.comparison_results";
 const screenshotsProdDir = path.join(outputDir, "prod");
@@ -20,11 +23,11 @@ fs.mkdirSync(screenshotsProdDir, { recursive: true });
 fs.mkdirSync(screenshotsMigratedDir, { recursive: true });
 
 const rawQueue = urls
-  .map((prodUrl) => {
-    const migratedUrl = prodUrl.replace(
-      env("PROD_WEBSITE_URL"),
-      env("STAGE_WEBSITE_URL")
-    );
+  .map((relativeUrl) => {
+    // Build full URLs using URL API
+    const prodUrl = new URL(relativeUrl, env("PROD_WEBSITE_URL")).toString();
+    const migratedUrl = new URL(relativeUrl, env("STAGE_WEBSITE_URL")).toString();
+
     const prodImgPath = path.join(
       screenshotsProdDir,
       `prod_${getFileName(prodUrl)}.png`
