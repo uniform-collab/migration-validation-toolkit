@@ -97,47 +97,57 @@ async function screenshotPageComponents(
       });
     }
 
+    console.log(`🌐 Navigating to URL: ${url}`);
     const parsedUrl = new URL(url);
     const searchTerm = parsedUrl.searchParams.get("searchTerm");
 
-    if (searchTerm) {
-      parsedUrl.searchParams.delete("searchTerm");
-      const cleanUrl = parsedUrl.toString();
-      await retryWithBackoff(
-        () =>
-          page.goto(cleanUrl, {
-            waitUntil: "load",
-            timeout: PLAYWRIGHT_TIMEOUT,
-          }),
-        1,
-        5000,
-        PLAYWRIGHT_TIMEOUT
-      );
+    try {
+      if (searchTerm) {
+        parsedUrl.searchParams.delete("searchTerm");
+        const cleanUrl = parsedUrl.toString();
+        await retryWithBackoff(
+          () =>
+            page.goto(cleanUrl, {
+              waitUntil: "load",
+              timeout: PLAYWRIGHT_TIMEOUT,
+            }),
+          1,
+          5000,
+          PLAYWRIGHT_TIMEOUT
+        );
 
-      console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
-      await page.waitForSelector(
-        'input[placeholder="What can we help you find?"]',
-        { timeout: 10000 }
-      );
-      await page.fill(
-        'input[placeholder="What can we help you find?"]',
-        searchTerm
-      );
-      await page.click('button[aria-label="search-button"]');
-      await page.waitForTimeout(10000);
-    } else {
-      await retryWithBackoff(
-        () =>
-          page.goto(url, {
-            waitUntil: "networkidle",
-            timeout: PLAYWRIGHT_TIMEOUT,
-          }),
-        1,
-        5000,
-        PLAYWRIGHT_TIMEOUT
-      );
+        console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
+        await page.waitForSelector(
+          'input[placeholder="What can we help you find?"]',
+          { timeout: 10000 }
+        );
+        await page.fill(
+          'input[placeholder="What can we help you find?"]',
+          searchTerm
+        );
+        await page.click('button[aria-label="search-button"]');
+        await page.waitForTimeout(10000);
+      } else {
+        await retryWithBackoff(
+          () =>
+            page.goto(url, {
+              waitUntil: "networkidle",
+              timeout: PLAYWRIGHT_TIMEOUT,
+            }),
+          1,
+          5000,
+          PLAYWRIGHT_TIMEOUT
+        );
 
-      await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
+        await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
+      }
+    } catch (err) {      
+      if (err.name === "TimeoutError") {
+        // if timeout, do screenshot anyway
+        console.warn(`⏰ Timeout navigating to ${url}, proceeding with screenshot`);
+      } else {
+        console.error(`🆘 Error navigating to ${url}:`, err);
+      }
     }
 
     const finalUrl = page.url();
