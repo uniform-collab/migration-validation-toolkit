@@ -86,86 +86,182 @@ for (let i = 0; i < numWorkers; i++) {
   }
 }
 
+function isHeaderName(name) {
+  const n = String(name || '').toLowerCase();
+  return n.includes('header');
+}
+
+function isFooterName(name) {
+  const n = String(name || '').toLowerCase();
+  return n.includes('footer');
+}
+
+function writeJUnit(filePath, testsuiteObj) {
+  const xml = create(testsuiteObj).end({ prettyPrint: true });
+  fs.writeFileSync(filePath, xml, { encoding: 'utf8' });
+}
+
+function tagRank(tag) {
+  switch ((tag || '').toLowerCase()) {
+    case 'critical-diff': return 5;
+    case 'major-diff':    return 4;
+    case 'medium-diff':   return 3;
+    case 'minor-diff':    return 2;
+    case 'perfect-match': return 1;
+    default:              return 0; // 'not compared' or unknown
+  }
+}
+
+function pickWorstTag(tags) {
+  let worst = null, worstRank = -1;
+  for (const t of tags) {
+    const r = tagRank(t);
+    if (r > worstRank) { worst = t; worstRank = r; }
+  }
+  return worst ?? 'not compared';
+}
+
+function makeComponentTestCase(result, comp, outputDir) {
+  const mismatchStr = comp.mismatch != null ? comp.mismatch.toFixed(2) : 'NaN';
+  const tag = comp.tag ?? result.tag ?? 'unclassified';
+
+  const attaches = [];
+  if (comp.prodImg)  attaches.push(path.relative(outputDir, path.join(outputDir, comp.prodImg)));
+  if (comp.stageImg) attaches.push(path.relative(outputDir, path.join(outputDir, comp.stageImg)));
+  if (comp.diffImg)  attaches.push(path.relative(outputDir, path.join(outputDir, comp.diffImg)));
+
+  const sysout = [
+    `• ${comp.component}: ${comp.mismatch != null ? comp.mismatch.toFixed(2) + '%' : 'N/A'} ${comp.tag ? '[' + comp.tag + ']' : ''}`,
+    '',
+    ...attaches.map(p => `[[ATTACHMENT|${p}]]`),
+  ].join('\n');
+
+  const tc = {
+    '@name': `[${tag}]: ${result.url} :: ${comp.component}`,
+    '@classname': tag,
+    properties: {
+      property: [
+        { '@name': 'url', '@value': result.url },
+        { '@name': 'component', '@value': comp.component },
+        { '@name': 'mismatchPercentage', '@value': mismatchStr },
+      ],
+    },
+    'system-out': { '#': `<![CDATA[\n${sysout}\n]]>` },
+  };
+
+  const failing = comp.match === false || (typeof comp.mismatch === 'number' && comp.mismatch > 0);
+  if (failing) {
+    tc.failure = {
+      '@message': `Visual mismatch in ${comp.component} for ${result.url}`,
+      '#': `Component mismatch: ${mismatchStr}%.`,
+    };
+  }
+
+  return tc;
+}
+
 function generateXmlReport(results) {
-  const testCasesWithDiffs = results.filter((r) =>
-    r.components?.some((c) => !c.match)
-  );
+  const outputDir = "./.comparison_results";
 
-  const testSuite = {
+  const overallCases = [];
+
+  for (const r of results) {
+    if (!r?.components?.length) continue;
+
+    const bodyComps = r.components.filter(c => !isHeaderName(c.component) && !isFooterName(c.component));
+    const bodyDiffs = bodyComps.filter(c => c.match === false || (typeof c.mismatch === 'number' && c.mismatch > 0));
+
+    if (bodyDiffs.length === 0) continue;
+
+    const tableText = bodyComps
+      .map(c => `• ${c.component}: ${c.mismatch != null ? c.mismatch.toFixed(2) + '%' : 'N/A'} ${c.tag ? '[' + c.tag + ']' : ''}`)
+      .join('\n');
+
+    const attachments = bodyComps.flatMap(c => {
+      const out = [];
+      if (c.prodImg)  out.push({ path: c.prodImg });
+      if (c.stageImg) out.push({ path: c.stageImg });
+      if (c.diffImg)  out.push({ path: c.diffImg });
+      return out;
+    });
+
+    const bodyTag = pickWorstTag(bodyComps.map(c => c.tag));
+
+    const attachmentBlock = attachments
+      .map(a => `[[ATTACHMENT|${path.relative(outputDir, path.join(outputDir, a.path))}]]`)
+      .join('\n');
+
+    const tc = {
+      '@name': `[${bodyTag}]: ${r.url}`,
+      '@classname': bodyTag,
+      properties: {
+        property: [
+          { '@name': 'mismatchTag', '@value': r.tag ?? 'undefined' },
+          { '@name': 'mismatchPercentage', '@value': 'N/A' },
+        ],
+      },
+      failure: {
+        '@message': `Visual mismatch (excluding header/footer) for ${r.url}`,
+        '#': `Body components have differences. See details below.`,
+      },
+      'system-out': { '#': `<![CDATA[\n${tableText}\n\n${attachmentBlock}\n]]>` },
+    };
+
+    overallCases.push(tc);
+  }
+
+  const overallSuite = {
     testsuite: {
-      "@name": "Visual Regression",
-      "@tests": testCasesWithDiffs.length,
-      "@failures": testCasesWithDiffs.length,
-      testcase: testCasesWithDiffs.map((result) => {
-        const mismatchOverall = result.mismatch?.toFixed(2) ?? "NaN";
-        const tag = result.tag ?? "unclassified";
-
-        const attachments = result.components.flatMap((component) => {
-          const out = [];
-          if (component.prodImg)
-            out.push({
-              label: `${component.component} PROD`,
-              path: component.prodImg,
-            });
-          if (component.stageImg)
-            out.push({
-              label: `${component.component} STAGE`,
-              path: component.stageImg,
-            });
-          if (component.diffImg)
-            out.push({
-              label: `${component.component} DIFF`,
-              path: component.diffImg,
-            });
-          return out;
-        });
-
-        const attachmentBlock = attachments
-          .map(
-            (item) =>
-              `[[ATTACHMENT|${path.relative(
-                outputDir,
-                path.join(outputDir, item.path)
-              )}]]`
-          )
-          .join("\n");
-
-        const tableText = result.components
-          .map((c) => {
-            return `• ${c.component}: ${
-              c.mismatch != null ? c.mismatch.toFixed(2) + "%" : "N/A"
-            } ${c.tag ? `[${c.tag}]` : ""}`;
-          })
-          .join("\n");
-
-        const testCase = {
-          "@name": `[${tag}]: ${result.url}`,
-          "@classname": `${tag}`,
-          properties: {
-            property: [
-              { "@name": "mismatchTag", "@value": result.tag ?? "undefined" },
-              { "@name": "mismatchPercentage", "@value": mismatchOverall },
-            ],
-          },
-          failure: {
-            "@message": `Visual mismatch detected for ${result.url}`,
-            "#": `Overall mismatch: ${mismatchOverall}%. See details below.`,
-          },
-        };
-
-        if (attachmentBlock || tableText) {
-          testCase["system-out"] = {
-            "#": `<![CDATA[\n${tableText}\n\n${attachmentBlock}\n]]>`,
-          };
-        }
-
-        return testCase;
-      }),
+      '@name': 'Visual Regression (without header/footer)',
+      '@tests': overallCases.length,
+      '@failures': overallCases.length,
+      testcase: overallCases,
     },
   };
 
-  const xml = create(testSuite).end({ prettyPrint: true });
-  fs.writeFileSync(path.join(outputDir, "results.xml"), xml, {
-    encoding: "utf8",
-  });
+  writeJUnit(path.join(outputDir, 'results.xml'), overallSuite);
+
+  const headerCases = [];
+  for (const r of results) {
+    if (!r?.components?.length) continue;
+    for (const c of r.components) {
+      if (isHeaderName(c.component)) {
+        headerCases.push(makeComponentTestCase(r, c, outputDir));
+      }
+    }
+  }
+  const headerSuite = {
+    testsuite: {
+      '@name': 'Visual Regression — Headers',
+      '@tests': headerCases.length,
+      '@failures': headerCases.filter(tc => !!tc.failure).length,
+      testcase: headerCases,
+    },
+  };
+  writeJUnit(path.join(outputDir, 'results_header.xml'), headerSuite);
+
+  const footerCases = [];
+  for (const r of results) {
+    if (!r?.components?.length) continue;
+    for (const c of r.components) {
+      if (isFooterName(c.component)) {
+        footerCases.push(makeComponentTestCase(r, c, outputDir));
+      }
+    }
+  }
+  const footerSuite = {
+    testsuite: {
+      '@name': 'Visual Regression — Footers',
+      '@tests': footerCases.length,
+      '@failures': footerCases.filter(tc => !!tc.failure).length,
+      testcase: footerCases,
+    },
+  };
+  writeJUnit(path.join(outputDir, 'results_footer.xml'), footerSuite);
+
+  console.log('📝 Wrote:',
+    path.join(outputDir, 'results.xml'),
+    path.join(outputDir, 'results_header.xml'),
+    path.join(outputDir, 'results_footer.xml'),
+  );
 }
