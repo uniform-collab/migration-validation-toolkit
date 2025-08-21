@@ -59,6 +59,7 @@ for (let i = 0; i < numWorkers; i++) {
 
           if (results.length === urls.length) {
             generateXmlReport(results);
+            writeMediaUrlsReport(results);
             console.log(
               "✅ Processing complete. Results saved to " + outputDir
             );
@@ -264,4 +265,145 @@ function generateXmlReport(results) {
     path.join(outputDir, 'results_header.xml'),
     path.join(outputDir, 'results_footer.xml'),
   );
+}
+
+function encodeURLToFilename(url) {
+  const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
+  return url.replace(illegalCharsRegex, ch => `%${ch.charCodeAt(0).toString(16)}`);
+}
+
+function getFileName(url) {
+  url = url.replace(env("STAGE_WEBSITE_URL"), "");
+  url = url.replace(env("PROD_WEBSITE_URL"), "");
+  url = url.startsWith("/") ? url.substring(1) : url;
+  const filename = encodeURLToFilename(url);
+  return filename || "index";
+}
+
+// https://img.uniform.global/.../<assetId>-<filename.ext> → <filename.ext>
+function mediaFilenameFromUrl(raw) {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.toLowerCase();
+    let last = u.pathname.split("/").filter(Boolean).pop() || "";
+    last = decodeURIComponent(last);
+
+    if (host === "img.uniform.global" || host.endsWith(".uniform.global")) {
+      const i = last.indexOf("-");
+      if (i > 0 && i < last.length - 1) {
+        const candidate = last.slice(i + 1);
+        if (candidate.includes(".")) return candidate.toLowerCase();
+      }
+    }
+    return last.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function collectMediaNamesFromBlocked(folderAbs) {
+  const file = path.join(folderAbs, "blocked-urls.txt");
+  if (!fs.existsSync(file)) return { names: [], existed: false };
+
+  const lines = fs.readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const set = new Set();
+  for (const line of lines) {
+    const name = mediaFilenameFromUrl(line);
+    if (name) set.add(name);
+  }
+  return { names: Array.from(set).sort(), existed: true };
+}
+
+function arrDiff(a, b) {
+  const B = new Set(b);
+  return a.filter(x => !B.has(x));
+}
+
+function compareBlockedMediaForSubdir(outputDir, subdir, urlForLog) {
+  const prodFolderAbs = path.join(outputDir, "prod", subdir);
+  const migFolderAbs  = path.join(outputDir, "migrated", subdir);
+
+  const prodInfo = collectMediaNamesFromBlocked(prodFolderAbs);
+  const migInfo  = collectMediaNamesFromBlocked(migFolderAbs);
+
+  const missingInMigrated = arrDiff(prodInfo.names, migInfo.names);
+  const extraInMigrated   = arrDiff(migInfo.names, prodInfo.names);
+
+  const union = new Set([...prodInfo.names, ...migInfo.names]);
+  const diffCount = missingInMigrated.length + extraInMigrated.length;
+  const mismatchPct = union.size ? (diffCount / union.size) * 100 : 0;
+
+  const isEqual = diffCount === 0;
+
+  const logLines = [];
+  logLines.push(`URL: ${urlForLog}`);
+  if (!prodInfo.existed)     logLines.push("prod/blocked-urls.txt: not found");
+  if (!migInfo.existed)      logLines.push("migrated/blocked-urls.txt: not found");
+  if (isEqual) {
+    logLines.push(`Media filenames match (${prodInfo.names.length})`);
+  } else {
+    logLines.push(
+      `Media filenames differ`,
+      `  Missing in migrated (${missingInMigrated.length}): ${missingInMigrated.join(", ") || "-"}`,
+      `  Extra in migrated (${extraInMigrated.length}): ${extraInMigrated.join(", ") || "-"}`
+    );
+  }
+
+  return {
+    url: urlForLog,
+    component: "__blocked_media_urls__",
+    match: isEqual,
+    mismatch: mismatchPct,
+    tag: isEqual ? "perfect-match" : "minor-diff", 
+    log: logLines.join("\n"),
+  };
+}
+
+function makeMediaTestCase(comp) {
+  const mismatchStr = comp.mismatch != null ? comp.mismatch.toFixed(2) : 'NaN';
+  const tc = {
+    '@name': `[${comp.tag}]: ${comp.url} :: ${comp.component}`,
+    '@classname': comp.tag,
+    properties: {
+      property: [
+        { '@name': 'url', '@value': comp.url },
+        { '@name': 'component', '@value': comp.component },
+        { '@name': 'mismatchPercentage', '@value': mismatchStr },
+      ],
+    },
+    'system-out': { '#': `<![CDATA[\n• ${comp.component}: ${mismatchStr}% [${comp.tag}]\n\n${comp.log}\n]]>` },
+  };
+
+  if (!comp.match || (typeof comp.mismatch === 'number' && comp.mismatch > 0)) {
+    tc.failure = {
+      '@message': `Blocked media filenames mismatch for ${comp.url}`,
+      '#': `Mismatch: ${mismatchStr}%`,
+    };
+  }
+  return tc;
+}
+
+function writeMediaUrlsReport(results) {
+  const cases = [];
+  for (const r of results) {
+    if (!r?.url) continue;
+    const subdir = getFileName(r.url);
+    const comp = compareBlockedMediaForSubdir(outputDir, subdir, r.url);
+    cases.push(makeMediaTestCase(comp));
+  }
+  const suite = {
+    testsuite: {
+      '@name': 'Blocked Media URLs',
+      '@tests': cases.length,
+      '@failures': cases.filter(tc => !!tc.failure).length,
+      testcase: cases,
+    },
+  };
+  writeJUnit(path.join(outputDir, 'results_media_urls.xml'), suite);
+  console.log('📝 Wrote:', path.join(outputDir, 'results_media_urls.xml'));
 }

@@ -1,7 +1,14 @@
 import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
-import { env, retryWithBackoff, gotoWithHardTimeout } from "./utils.js";
+import {
+  env,
+  retryWithBackoff,
+  isGif,
+  isVideo,
+  extractCandidateUrl,
+  isAllowedMediaUrl
+} from "./utils.js";
 import dotenv from "dotenv";
 import sharp from "sharp";
 dotenv.config();
@@ -23,6 +30,8 @@ process.on("message", async (obj) => {
   const start = Date.now();
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
+    serviceWorkers: "block", // prevent SW from hijacking requests
+    reducedMotion: 'reduce',
   });
 
   let result = false;
@@ -88,6 +97,38 @@ async function screenshotPageComponents(
 
   const page = await context.newPage();
 
+  const blockedUrls = [];
+
+  await page.route("**/*", (route) => {
+    const req = route.request();
+    const rawUrl = req.url();
+
+    // unwrap proxies like /_next/image?url=...
+    const url = extractCandidateUrl(rawUrl).toLowerCase();
+
+    // ✅ allowlist: do not block clarity pixel
+    if (isAllowedMediaUrl(url)) {
+      return route.continue();
+    }
+
+    if (isGif(url)) {
+      blockedUrls.push(url);
+      console.log("🚫 GIF blocked:", url);
+      return route.abort();
+    }
+    if (isVideo(url, req.resourceType())) {
+      blockedUrls.push(url);
+      console.log("🚫 VIDEO blocked:", url);
+      return route.abort();
+    }
+    if (/\.(m3u8|mpd|ts|m4s)(\?|#|$)/.test(url)) {
+      blockedUrls.push(url);
+      console.log("🚫 STREAM blocked:", url);
+      return route.abort();
+    }
+    return route.continue();
+  });
+
   try {
     if (isStage && process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
       await page.setExtraHTTPHeaders({
@@ -141,10 +182,12 @@ async function screenshotPageComponents(
 
         await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
       }
-    } catch (err) {      
+    } catch (err) {
       if (err.name === "TimeoutError") {
-        // if timeout, do screenshot anyway
-        console.warn(`⏰ Timeout navigating to ${url}, proceeding with screenshot`);
+        // if timeout, do screenshot with what is loaded - maybe a video on the page
+        console.warn(
+          `⏰ Timeout navigating to ${url}, proceeding with screenshot`
+        );
       } else {
         console.error(`🆘 Error navigating to ${url}:`, err);
       }
@@ -161,6 +204,159 @@ async function screenshotPageComponents(
       const redirectFile = path.join(componentDir, "redirect.txt");
       fs.writeFileSync(redirectFile, finalUrl, { encoding: "utf8" });
     }
+
+    if (blockedUrls.length > 0) {
+      console.warn(`🚫 Blocked URLs: ${blockedUrls.length} items`);
+      const blockedUrlsPath = path.join(componentDir, "blocked-urls.txt");
+      try {
+        fs.writeFileSync(
+          blockedUrlsPath,
+          (blockedUrls || []).join("\n") + (blockedUrls.length ? "\n" : ""),
+          "utf8"
+        );
+        console.log(`📝 Blocked URLs saved: ${blockedUrlsPath}`);
+      } catch (e) {
+        console.warn(`⚠️ Failed to write Blocked URLs: ${e.message}`);
+      }
+    }
+
+    // Nudge lazy loaders to populate attributes (requests are still blocked by route)
+    await page.evaluate(async () => {
+      const total = Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight
+      );
+      let y = 0;
+      while (y < total) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 60));
+        y += window.innerHeight * 0.9;
+      }
+      window.scrollTo(0, 0);
+    });
+
+    await page.evaluate(() => {
+      // Keep layout but hide visually
+      const hide = (el) => {
+        if (!el || el.__hiddenByWorker) return;
+        el.setAttribute("data-original-visibility", el.style.visibility || "");
+        el.style.visibility = "hidden";
+        el.__hiddenByWorker = true;
+      };
+
+      const looksGif = (val) => {
+        if (!val) return false;
+        return /\.gif(\?|#|$)/i.test(String(val));
+      };
+
+      const looksGifInSrcset = (srcset) => {
+        if (!srcset) return false;
+        // Fast check before splitting
+        if (!/\.gif/i.test(srcset)) return false;
+        return srcset.split(",").some((part) => {
+          const u = part.trim().split(/\s+/)[0];
+          return looksGif(u);
+        });
+      };
+
+      const checkImg = (img) => {
+        if (!img || img.__hiddenByWorker) return;
+
+        const attrs = [
+          img.currentSrc,
+          img.src,
+          img.getAttribute("src"),
+          img.getAttribute("data-src"),
+          img.getAttribute("data-lazy"),
+          img.getAttribute("data-original"),
+          img.getAttribute("data-url"),
+          img.getAttribute("data-bg"),
+          img.getAttribute("data-background-image"),
+        ];
+
+        if (attrs.some(looksGif)) return hide(img);
+
+        if (
+          looksGifInSrcset(img.getAttribute("srcset")) ||
+          looksGifInSrcset(img.getAttribute("data-srcset")) ||
+          looksGifInSrcset(img.getAttribute("data-lazy-srcset")) ||
+          looksGifInSrcset(img.getAttribute("data-llsrcset"))
+        ) {
+          return hide(img);
+        }
+
+        // CSS background-image on the <img> itself (some libs use it)
+        const bi = getComputedStyle(img).backgroundImage;
+        if (bi && /\.gif/i.test(bi)) hide(img);
+      };
+
+      // Initial pass
+      document.querySelectorAll("video").forEach(hide);
+      document.querySelectorAll("img").forEach(checkImg);
+
+      // <picture><source srcset>
+      document.querySelectorAll("picture source").forEach((s) => {
+        const srcset =
+          s.getAttribute("srcset") || s.getAttribute("data-srcset");
+        if (looksGifInSrcset(srcset)) {
+          const img = s.closest("picture")?.querySelector("img");
+          if (img) hide(img);
+        }
+      });
+
+      // Any element with background-image GIF (hero blocks, divs, etc.)
+      document.querySelectorAll("*").forEach((el) => {
+        const bi = getComputedStyle(el).backgroundImage;
+        if (bi && /\.gif/i.test(bi)) hide(el);
+      });
+
+      // Watch for lazy loaders mutating attributes after initial scan
+      const obs = new MutationObserver((muts) => {
+        for (const m of muts) {
+          const t = m.target;
+          if (t instanceof HTMLImageElement) checkImg(t);
+          if (t instanceof HTMLVideoElement) hide(t);
+          if (t instanceof HTMLSourceElement) {
+            // <source> inside <picture>
+            const srcset =
+              t.getAttribute("srcset") || t.getAttribute("data-srcset");
+            if (looksGifInSrcset(srcset)) {
+              const img = t.closest("picture")?.querySelector("img");
+              if (img) hide(img);
+            }
+          }
+          if (
+            t instanceof Element &&
+            (m.attributeName === "style" || m.attributeName === "class")
+          ) {
+            const bi = getComputedStyle(t).backgroundImage;
+            if (bi && /\.gif/i.test(bi)) hide(t);
+          }
+        }
+      });
+
+      obs.observe(document.documentElement, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+          "src",
+          "srcset",
+          "poster",
+          "style",
+          "class",
+          "data-src",
+          "data-srcset",
+          "data-lazy",
+          "data-original",
+          "data-url",
+          "data-bg",
+          "data-background-image",
+        ],
+      });
+
+      // Keep a reference to prevent GC
+      window.__mediaHideObserver = obs;
+    });
 
     await freezeAnimations(page);
 
