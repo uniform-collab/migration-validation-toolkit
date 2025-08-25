@@ -108,8 +108,8 @@ function tagRank(tag) {
     case 'major-diff':    return 4;
     case 'medium-diff':   return 3;
     case 'minor-diff':    return 2;
-    case 'perfect-match': return 1;
-    default:              return 0; // 'not compared' or unknown
+    case 'not compared': return 1;
+    default:              return 0; // unknown
   }
 }
 
@@ -119,7 +119,7 @@ function pickWorstTag(tags) {
     const r = tagRank(t);
     if (r > worstRank) { worst = t; worstRank = r; }
   }
-  return worst ?? 'not compared';
+  return worst ?? 'unknown';
 }
 
 function makeComponentTestCase(result, comp, outputDir) {
