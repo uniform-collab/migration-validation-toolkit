@@ -7,7 +7,7 @@ import {
   isGif,
   isVideo,
   extractCandidateUrl,
-  isAllowedMediaUrl
+  isAllowedMediaUrl,
 } from "./utils.js";
 import dotenv from "dotenv";
 import sharp from "sharp";
@@ -31,7 +31,7 @@ process.on("message", async (obj) => {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
     serviceWorkers: "block", // prevent SW from hijacking requests
-    reducedMotion: 'reduce',
+    reducedMotion: "reduce",
   });
 
   let result = false;
@@ -235,129 +235,6 @@ async function screenshotPageComponents(
       window.scrollTo(0, 0);
     });
 
-    await page.evaluate(() => {
-      // Keep layout but hide visually
-      const hide = (el) => {
-        if (!el || el.__hiddenByWorker) return;
-        el.setAttribute("data-original-visibility", el.style.visibility || "");
-        el.style.visibility = "hidden";
-        el.__hiddenByWorker = true;
-      };
-
-      const looksGif = (val) => {
-        if (!val) return false;
-        return /\.gif(\?|#|$)/i.test(String(val));
-      };
-
-      const looksGifInSrcset = (srcset) => {
-        if (!srcset) return false;
-        // Fast check before splitting
-        if (!/\.gif/i.test(srcset)) return false;
-        return srcset.split(",").some((part) => {
-          const u = part.trim().split(/\s+/)[0];
-          return looksGif(u);
-        });
-      };
-
-      const checkImg = (img) => {
-        if (!img || img.__hiddenByWorker) return;
-
-        const attrs = [
-          img.currentSrc,
-          img.src,
-          img.getAttribute("src"),
-          img.getAttribute("data-src"),
-          img.getAttribute("data-lazy"),
-          img.getAttribute("data-original"),
-          img.getAttribute("data-url"),
-          img.getAttribute("data-bg"),
-          img.getAttribute("data-background-image"),
-        ];
-
-        if (attrs.some(looksGif)) return hide(img);
-
-        if (
-          looksGifInSrcset(img.getAttribute("srcset")) ||
-          looksGifInSrcset(img.getAttribute("data-srcset")) ||
-          looksGifInSrcset(img.getAttribute("data-lazy-srcset")) ||
-          looksGifInSrcset(img.getAttribute("data-llsrcset"))
-        ) {
-          return hide(img);
-        }
-
-        // CSS background-image on the <img> itself (some libs use it)
-        const bi = getComputedStyle(img).backgroundImage;
-        if (bi && /\.gif/i.test(bi)) hide(img);
-      };
-
-      // Initial pass
-      document.querySelectorAll("video").forEach(hide);
-      document.querySelectorAll("img").forEach(checkImg);
-
-      // <picture><source srcset>
-      document.querySelectorAll("picture source").forEach((s) => {
-        const srcset =
-          s.getAttribute("srcset") || s.getAttribute("data-srcset");
-        if (looksGifInSrcset(srcset)) {
-          const img = s.closest("picture")?.querySelector("img");
-          if (img) hide(img);
-        }
-      });
-
-      // Any element with background-image GIF (hero blocks, divs, etc.)
-      document.querySelectorAll("*").forEach((el) => {
-        const bi = getComputedStyle(el).backgroundImage;
-        if (bi && /\.gif/i.test(bi)) hide(el);
-      });
-
-      // Watch for lazy loaders mutating attributes after initial scan
-      const obs = new MutationObserver((muts) => {
-        for (const m of muts) {
-          const t = m.target;
-          if (t instanceof HTMLImageElement) checkImg(t);
-          if (t instanceof HTMLVideoElement) hide(t);
-          if (t instanceof HTMLSourceElement) {
-            // <source> inside <picture>
-            const srcset =
-              t.getAttribute("srcset") || t.getAttribute("data-srcset");
-            if (looksGifInSrcset(srcset)) {
-              const img = t.closest("picture")?.querySelector("img");
-              if (img) hide(img);
-            }
-          }
-          if (
-            t instanceof Element &&
-            (m.attributeName === "style" || m.attributeName === "class")
-          ) {
-            const bi = getComputedStyle(t).backgroundImage;
-            if (bi && /\.gif/i.test(bi)) hide(t);
-          }
-        }
-      });
-
-      obs.observe(document.documentElement, {
-        subtree: true,
-        attributes: true,
-        attributeFilter: [
-          "src",
-          "srcset",
-          "poster",
-          "style",
-          "class",
-          "data-src",
-          "data-srcset",
-          "data-lazy",
-          "data-original",
-          "data-url",
-          "data-bg",
-          "data-background-image",
-        ],
-      });
-
-      // Keep a reference to prevent GC
-      window.__mediaHideObserver = obs;
-    });
-
     await freezeAnimations(page);
 
     const components = await getComponentSelectors(page);
@@ -476,18 +353,21 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
       await page.waitForTimeout(500);
 
       // Wait until all images within the component are fully loaded
-      await element.evaluate(async (el) => {
-        const images = el.querySelectorAll("img");
-        await Promise.all(
-          Array.from(images).map((img) => {
-            if (img.complete) return Promise.resolve();
-            return new Promise((resolve) => {
-              img.onload = () => resolve();
-              img.onerror = () => resolve();
-            });
-          })
-        );
-      });
+      await Promise.race([
+        element.evaluate(async (el) => {
+          const images = el.querySelectorAll("img");
+          await Promise.all(
+            Array.from(images).map((img) => {
+              if (img.complete) return Promise.resolve();
+              return new Promise((resolve) => {
+                img.onload = () => resolve();
+                img.onerror = () => resolve();
+              });
+            })
+          );
+        }),
+        page.waitForTimeout(5000),
+      ]);
 
       // Final buffer before capture for extra stability
       await page.waitForTimeout(300);

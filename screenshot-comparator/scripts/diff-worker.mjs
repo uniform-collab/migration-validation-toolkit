@@ -16,7 +16,7 @@ process.on("message", async (obj) => {
 });
 
 async function doWork(obj) {
-  const { outputDir, prodUrl, migratedUrl } = obj;
+  const { outputDir, prodUrl, migratedUrl, relativeUrl } = obj;
 
   const prodFolder = path.join(outputDir, "prod", getFileName(prodUrl));
   const migratedFolder = path.join(
@@ -65,23 +65,11 @@ async function doWork(obj) {
         `🚨 Redirect mismatch: PROD → ${prodFinalUrl}, MIGRATED → ${migratedFinalUrl}`
       );
 
-      for (const componentName of allComponentNames) {
-        results.push({
-          component: componentName,
-          prodImg: null,
-          stageImg: null,
-          diffImg: null,
-          match: false,
-          mismatch: 100.0,
-          tag: "redirect-url-mismatch",
-          log: `🔀 Redirected URLs are different: ${prodFinalUrl} vs ${migratedFinalUrl}`,
-        });
-      }
-
       return {
-        url: prodUrl,
+        url: relativeUrl,
         mismatch: 100.0,
         tag: "redirect-url-mismatch",
+        log: `🔀 Redirected URLs are different: ${prodFinalUrl} vs ${migratedFinalUrl}`,
         components: results,
       };
     }
@@ -168,7 +156,7 @@ async function doWork(obj) {
       totalHeight > 0 ? totalWeightedMismatch / totalHeight : null;
 
     return {
-      url: prodUrl,
+      url: relativeUrl,
       mismatch:
         totalMismatchScore != null
           ? parseFloat(totalMismatchScore.toFixed(2))

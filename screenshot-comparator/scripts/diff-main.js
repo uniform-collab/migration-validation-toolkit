@@ -29,7 +29,7 @@ for (let i = 0; i < numWorkers; i++) {
     const prodUrl = new URL(relativeUrl, env("PROD_WEBSITE_URL")).toString();
     const migratedUrl = new URL(relativeUrl, env("STAGE_WEBSITE_URL")).toString();
 
-    const obj = { outputDir, prodUrl, migratedUrl };
+    const obj = { outputDir, prodUrl, migratedUrl, relativeUrl };
     console.log(
       "💠 Diff the screenshot of " + obj.prodUrl + " with " + obj.migratedUrl
     );
@@ -260,10 +260,53 @@ function generateXmlReport(results) {
   };
   writeJUnit(path.join(outputDir, 'results_footer.xml'), footerSuite);
 
+  const redirectCases = [];
+  for (const r of results) {
+    if (r?.tag === 'redirect-url-mismatch') {
+      const prodF = r.prodFinalUrl || '';
+      const migF  = r.migratedFinalUrl || '';
+      const sysout = [
+        `URL: ${r.url}`,
+        '',
+        r.log ? r.log : ''
+      ].join('\n');
+
+      redirectCases.push({
+        '@name': `[redirect-url-mismatch]: ${r.url}`,
+        '@classname': 'redirect-url-mismatch',
+        properties: {
+          property: [
+            { '@name': 'url', '@value': r.url },
+            { '@name': 'prodFinalUrl', '@value': prodF },
+            { '@name': 'migratedFinalUrl', '@value': migF },
+            { '@name': 'mismatchPercentage', '@value': (r.mismatch ?? 100).toString() },
+          ],
+        },
+        failure: {
+          '@message': `Redirect targets differ for ${r.url}`,
+          '#': `PROD → ${prodF}\nMIGRATED → ${migF}`,
+        },
+        'system-out': { '#': `<![CDATA[\n${sysout}\n]]>` },
+      });
+    }
+  }
+
+  const redirectsSuite = {
+    testsuite: {
+      '@name': 'Redirect URL Mismatches',
+      '@tests': redirectCases.length,
+      '@failures': redirectCases.length,
+      testcase: redirectCases,
+    },
+  };
+
+  writeJUnit(path.join(outputDir, 'results_redirects.xml'), redirectsSuite);
+
   console.log('📝 Wrote:',
     path.join(outputDir, 'results.xml'),
     path.join(outputDir, 'results_header.xml'),
     path.join(outputDir, 'results_footer.xml'),
+    path.join(outputDir, 'results_redirects.xml'),
   );
 }
 
