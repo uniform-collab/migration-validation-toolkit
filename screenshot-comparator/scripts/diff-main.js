@@ -17,6 +17,7 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
+const ignoreList = loadIgnoreList();
 const numWorkers = 4;
 const chunkSize = Math.ceil(urls.length / numWorkers);
 const results = [];
@@ -29,7 +30,7 @@ for (let i = 0; i < numWorkers; i++) {
     const prodUrl = new URL(relativeUrl, env("PROD_WEBSITE_URL")).toString();
     const migratedUrl = new URL(relativeUrl, env("STAGE_WEBSITE_URL")).toString();
 
-    const obj = { outputDir, prodUrl, migratedUrl, relativeUrl };
+    const obj = { outputDir, prodUrl, migratedUrl, relativeUrl, ignoreList };
     console.log(
       "💠 Diff the screenshot of " + obj.prodUrl + " with " + obj.migratedUrl
     );
@@ -87,6 +88,19 @@ for (let i = 0; i < numWorkers; i++) {
   }
 }
 
+function loadIgnoreList() {
+  const raw = process.env.VISUAL_REGRESSION_EXCLUDE_RESULTS;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    console.log(`Loaded ${raw} ignore diff rules from VISUAL_REGRESSION_EXCLUDE_RESULTS env variable`);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.warn("⚠️ Failed to parse VISUAL_REGRESSION_EXCLUDE_RESULTS JSON:", e.message);
+    return [];
+  }
+}
+
 function isHeaderName(name) {
   const n = String(name || '').toLowerCase();
   return n.includes('header');
@@ -104,10 +118,11 @@ function writeJUnit(filePath, testsuiteObj) {
 
 function tagRank(tag) {
   switch ((tag || '').toLowerCase()) {
-    case 'critical-diff': return 5;
-    case 'major-diff':    return 4;
-    case 'medium-diff':   return 3;
-    case 'minor-diff':    return 2;
+    case 'critical-diff': return 6;
+    case 'major-diff':    return 5;
+    case 'medium-diff':   return 4;
+    case 'minor-diff':    return 3;
+    case 'ignored-diff': return 2;
     case 'not compared': return 1;
     default:              return 0; // unknown
   }

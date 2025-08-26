@@ -16,7 +16,7 @@ process.on("message", async (obj) => {
 });
 
 async function doWork(obj) {
-  const { outputDir, prodUrl, migratedUrl, relativeUrl } = obj;
+  const { outputDir, prodUrl, migratedUrl, relativeUrl, ignoreList } = obj;
 
   const prodFolder = path.join(outputDir, "prod", getFileName(prodUrl));
   const migratedFolder = path.join(
@@ -125,6 +125,26 @@ async function doWork(obj) {
         prodImgPath,
         stageImgPath
       );
+
+      const ignored = shouldIgnoreDiff(
+        relativeUrl,
+        componentName,
+        mismatch,
+        ignoreList
+      );
+      if (ignored) {
+        console.log(
+          `ℹ️ Ignored difference for ${relativeUrl} :: ${componentName} with ${mismatch}% mismatch as per ignore list`
+        );
+        return {
+          component: componentName,
+          match: true,
+          mismatch: null,
+          diffImg: null,
+          log: `Ignored difference for ${relativeUrl} :: ${componentName} with ${mismatch}% mismatch as per ignore list`,
+          tag: "ignored-diff",
+        };
+      }
 
       if (!isNaN(mismatch) && height > 0) {
         totalWeightedMismatch += mismatch * height;
@@ -257,4 +277,16 @@ function getDiffTag(mismatch) {
   if (mismatch <= 5) return "medium-diff";
   if (mismatch <= 20) return "major-diff";
   return "critical-diff";
+}
+
+function shouldIgnoreDiff(url, component, mismatch, ignoreList) {
+  if (mismatch == null) return false;
+  for (const rule of ignoreList) {
+    if (!rule) continue;
+
+    if (rule.url === url && rule.component === component && mismatch == rule.percents) {
+      return true;
+    }
+  }
+  return false;
 }
