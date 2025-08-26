@@ -14,7 +14,9 @@ import sharp from "sharp";
 dotenv.config();
 
 // Shared browser and context reused across tasks
-const browser = await chromium.launch();
+const browser = await chromium.launch({
+  //headless: false,
+});
 
 const PLAYWRIGHT_TIMEOUT = process.env.PLAYWRIGHT_TIMEOUT
   ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
@@ -237,7 +239,11 @@ async function screenshotPageComponents(
 
     await freezeAnimations(page);
 
+    const client = await page.context().newCDPSession(page);
+    await client.send('Emulation.setScriptExecutionDisabled', { value: true });
+
     const components = await getComponentSelectors(page);
+
     await screenshotComponents(url, page, components, componentDir, isStage);
   } finally {
     await page.close(); // always close the page
