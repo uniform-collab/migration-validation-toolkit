@@ -138,7 +138,7 @@ function makeComponentTestCase(result, comp, outputDir) {
   ].join('\n');
 
   const tc = {
-    '@name': `[${tag}]: ${result.url} :: ${comp.component}`,
+    '@name': `${result.url} :: ${comp.component}`,
     '@classname': tag,
     properties: {
       property: [
@@ -193,7 +193,7 @@ function generateXmlReport(results) {
       .join('\n');
 
     const tc = {
-      '@name': `[${bodyTag}]: ${r.url}`,
+      '@name': `${r.url}`,
       '@classname': bodyTag,
       properties: {
         property: [
@@ -272,7 +272,7 @@ function generateXmlReport(results) {
       ].join('\n');
 
       redirectCases.push({
-        '@name': `[redirect-url-mismatch]: ${r.url}`,
+        '@name': `${r.url}`,
         '@classname': 'redirect-url-mismatch',
         properties: {
           property: [
@@ -410,7 +410,7 @@ function compareBlockedMediaForSubdir(outputDir, subdir, urlForLog) {
 function makeMediaTestCase(comp) {
   const mismatchStr = comp.mismatch != null ? comp.mismatch.toFixed(2) : 'NaN';
   const tc = {
-    '@name': `[${comp.tag}]: ${comp.url} :: ${comp.component}`,
+    '@name': `${comp.url} :: ${comp.component}`,
     '@classname': comp.tag,
     properties: {
       property: [
