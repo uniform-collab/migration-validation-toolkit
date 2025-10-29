@@ -253,34 +253,38 @@ async function screenshotPageComponents(
 async function getComponentSelectors(page) {
   return await page.evaluate(() => {
     const selectors = [];
-    const header = document.querySelector("header");
-    const footer = document.querySelector("footer");
 
-    if (header) selectors.push({ name: "header", selector: "header" });
+    const header = document.querySelector('[data-segment-category="Header"]');
+    const footer = document.querySelector("footer");
+    const main = document.querySelector("main");
+
+    if (header) {
+      selectors.push({
+        name: "header",
+        selector: '[data-segment-category="Header"]',
+      });
+    }
 
     const isFixed = (el) => {
       const style = window.getComputedStyle(el);
       return style.position === "fixed";
     };
 
-    if (header && footer) {
-      let current = header.nextElementSibling;
+    if (main) {
       let index = 0;
-      while (current && current !== footer) {
-        if (
-          current.tagName.toLowerCase() !== "script" &&
-          current.nodeType === 1 &&
-          !isFixed(current)
-        ) {
-          const uniqueSelector = `div-${String(index).padStart(2, "0")}`;
-          current.setAttribute("data-component-id", uniqueSelector);
-          selectors.push({
-            name: uniqueSelector,
-            selector: `[data-component-id="${uniqueSelector}"]`,
-          });
-          index++;
-        }
-        current = current.nextElementSibling;
+      const mainChildren = Array.from(main.children).filter(
+        (el) =>
+          (el.tagName === "DIV" || el.tagName === "SECTION") && !isFixed(el)
+      );
+
+      for (const el of mainChildren) {
+        const uniqueSelector = `component-${String(index).padStart(2, "0")}`;
+        el.setAttribute("data-component-id", uniqueSelector);
+        selectors.push({
+          name: uniqueSelector,
+          selector: `[data-component-id="${uniqueSelector}"]`,
+        });
+        index++;
       }
     }
 
@@ -289,6 +293,7 @@ async function getComponentSelectors(page) {
     return selectors;
   });
 }
+
 
 async function screenshotComponents(url, page, components, outputDir, isStage) {
   for (const comp of components) {

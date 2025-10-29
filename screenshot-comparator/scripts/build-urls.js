@@ -44,13 +44,11 @@ try {
   console.log(`Filtered paths: ${updatedPaths.length} valid paths.`);
 
   const typeMapping = {
-    articles: "articleDetail",
-    conference: "conferencesDetail",
-    "od-ls": "onlineTrainingDetail",
-    webinars: "webinarsDetail",
-    "od-ls-watch-page": "onlineTrainingDetail",
-    hardGoodDetail: "hardGoodDetail",
-    speaker: "personDetail",
+    career: "Career",
+    event: "Event",    
+    insight: "Insight",
+    news: "News",
+    product: "Product",
   };
 
   updatedPaths.forEach((slug) => {
