@@ -10,7 +10,7 @@ async function getSitemapUrls(url) {
   const xml = await res.text();
 
   const urls = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) =>
-    match[1].replace(/\/$/, "")
+    match[1].replace(/\/$/, "").replace(/\/home(?=\/|$)/, "/")
   );
 
   return urls;
