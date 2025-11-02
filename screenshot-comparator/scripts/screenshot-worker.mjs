@@ -237,6 +237,14 @@ async function screenshotPageComponents(
       window.scrollTo(0, 0);
     });
 
+    // 🔥 https://cobham-satcom.com customization remove after
+    await page.evaluate(() => {
+      document.querySelectorAll('div[id^="embed_"]').forEach((el) => {
+        console.log("🗑️ Removing embed div:", el.id);
+        el.remove();
+      });
+    });
+
     await freezeAnimations(page);
 
     const client = await page.context().newCDPSession(page);
