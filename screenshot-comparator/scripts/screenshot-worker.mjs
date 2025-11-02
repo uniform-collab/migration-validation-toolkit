@@ -248,7 +248,7 @@ async function screenshotPageComponents(
     await freezeAnimations(page);
 
     const client = await page.context().newCDPSession(page);
-    await client.send('Emulation.setScriptExecutionDisabled', { value: true });
+    //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
 
     const components = await getComponentSelectors(page);
 
