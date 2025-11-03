@@ -247,6 +247,15 @@ async function screenshotPageComponents(
         console.log("🗑️ Removing breadcrumb element:", el.className);
         el.remove();
       });
+      const header = document.querySelector('[data-segment-category="Header"]');
+      if (header) {
+        const style = getComputedStyle(header);
+        if (style.position === "sticky") {
+          header.style.position = "static";
+          header.style.top = "auto";
+          console.log("🧷 Sticky header disabled");
+        }
+      }
     });
 
     await freezeAnimations(page);
@@ -305,7 +314,6 @@ async function getComponentSelectors(page) {
     return selectors;
   });
 }
-
 
 async function screenshotComponents(url, page, components, outputDir, isStage) {
   for (const comp of components) {
