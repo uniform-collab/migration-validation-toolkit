@@ -238,6 +238,20 @@ async function screenshotPageComponents(
     });
 
     // 🔥 https://cobham-satcom.com customization remove after
+    const isPageNotFound = await page.evaluate(() => {
+      const title = (document.title || "").toLowerCase();
+      const bodyText = (document.body?.innerText || "").toLowerCase();
+      return (
+        title.includes("page not found") || bodyText.includes("page not found")
+      );
+    });
+
+    if (isPageNotFound) {
+      console.warn(`🚫 Skipping "Page not found" page: ${url}`);
+      return;
+    }
+
+    // 🔥 https://cobham-satcom.com customization remove after
     await page.evaluate(() => {
       document.querySelectorAll('div[id^="embed_"]').forEach((el) => {
         console.log("🗑️ Removing embed div:", el.id);
