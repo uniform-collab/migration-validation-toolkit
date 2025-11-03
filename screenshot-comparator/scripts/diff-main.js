@@ -118,12 +118,13 @@ function writeJUnit(filePath, testsuiteObj) {
 
 function tagRank(tag) {
   switch ((tag || '').toLowerCase()) {
-    case 'critical-diff': return 6;
-    case 'major-diff':    return 5;
-    case 'medium-diff':   return 4;
-    case 'minor-diff':    return 3;
+    case 'critical-diff': return 7;
+    case 'major-diff':    return 6;
+    case 'medium-diff':   return 5;
+    case 'minor-diff':    return 4;
+    case 'extra-in-migrated': return 3;
     case 'ignored-diff': return 2;
-    case 'not compared': return 1;
+    case 'not compared': return 1;    
     default:              return 0; // unknown
   }
 }
@@ -212,7 +213,7 @@ function generateXmlReport(results) {
       '@classname': bodyTag,
       properties: {
         property: [
-          { '@name': 'mismatchTag', '@value': r.tag ?? 'undefined' },
+          { '@name': 'mismatchTag', '@value': bodyTag ?? 'undefined' },
           { '@name': 'mismatchPercentage', '@value': 'N/A' },
         ],
       },
