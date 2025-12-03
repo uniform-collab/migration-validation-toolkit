@@ -30,7 +30,7 @@ const invalidUrls = [];
 
 // Keywords/phrases for soft 404
 const SOFT_404_PHRASES = [
-  "404",
+  "404 error",
   "not found",
   "page not found",
   "page you are looking for"
@@ -38,7 +38,7 @@ const SOFT_404_PHRASES = [
 
 // Keywords/phrases for soft 500
 const SOFT_500_PHRASES = [
-  "500",
+  "500 error",
   "internal server error",
   "server error"
 ];
