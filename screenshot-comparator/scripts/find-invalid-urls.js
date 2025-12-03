@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const BASE_URL = env("STAGE_WEBSITE_URL");
-const SITEMAP_FILE = "./.temp/urls-sitemap.json";
+const SITEMAP_FILE = "./.temp/urls.json";
 
 // Default concurrency for processing sitemap entries
 const DEFAULT_CONCURRENCY = 4;
