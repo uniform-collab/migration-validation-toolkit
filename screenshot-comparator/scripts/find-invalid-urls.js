@@ -325,10 +325,17 @@ async function main() {
 
     if (invalidUrls.length === 0) {
       console.log("🎉 No invalid URLs found!");
+      // Explicit success exit code for CI
+      process.exit(0);
     } else {
       invalidUrls.forEach((u) => {
         console.log(`❌ ${u.url} (${u.status}) — ${u.reason}`);
       });
+
+      console.log(
+        `\n❌ Found ${invalidUrls.length} invalid URL(s). Exiting with code 1 so the pipeline fails.`
+      );
+      process.exit(1);
     }
   } catch (err) {
     console.error("Fatal error:", err);
