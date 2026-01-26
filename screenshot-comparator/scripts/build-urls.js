@@ -7,7 +7,20 @@ dotenv.config();
 
 try {
   console.log("Reading entries from entries.json");
-  const entries = JSON.parse(fs.readFileSync("data/entries.json", "utf-8"));
+
+  let entries = [];
+
+  if (fs.existsSync("data/entries.json")) {
+    try {
+      entries = JSON.parse(fs.readFileSync("data/entries.json", "utf-8"));
+    } catch (e) {
+      console.warn("⚠️ entries.json exists but is invalid JSON, using empty array");
+      entries = [];
+    }
+  } else {
+    console.log("ℹ️ entries.json not found, using empty array");
+  }
+
   console.log(`Found ${entries.length} entries.`);
 
   const urls = new Set();
