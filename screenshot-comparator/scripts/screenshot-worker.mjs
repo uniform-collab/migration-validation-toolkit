@@ -288,38 +288,45 @@ async function screenshotPageComponents(
 async function getComponentSelectors(page) {
   return await page.evaluate(() => {
     const selectors = [];
-    const header = document.querySelector("header");
-    const footer = document.querySelector("footer");
-
-    if (header) selectors.push({ name: "header", selector: "header" });
 
     const isFixed = (el) => {
       const style = window.getComputedStyle(el);
       return style.position === "fixed";
     };
 
-    if (header && footer) {
-      let current = header.nextElementSibling;
-      let index = 0;
-      while (current && current !== footer) {
-        if (
-          current.tagName.toLowerCase() !== "script" &&
-          current.nodeType === 1 &&
-          !isFixed(current)
-        ) {
-          const uniqueSelector = `div-${String(index).padStart(2, "0")}`;
-          current.setAttribute("data-component-id", uniqueSelector);
-          selectors.push({
-            name: uniqueSelector,
-            selector: `[data-component-id="${uniqueSelector}"]`,
-          });
-          index++;
-        }
-        current = current.nextElementSibling;
-      }
-    }
+    const isVisible = (el) => {
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
 
-    if (footer) selectors.push({ name: "footer", selector: "footer" });
+    const main = document.querySelector("main") || document.body;
+
+    const scope =
+      main.querySelector("#content .row") ||
+      main.querySelector("#content") ||
+      main;
+
+    const components = Array.from(scope.querySelectorAll("div.component"));
+
+    let index = 0;
+    for (const el of components) {
+      const tag = el.tagName.toLowerCase();
+      if (tag === "script" || tag === "style") continue;
+      if (isFixed(el)) continue;
+      if (!isVisible(el)) continue;
+
+      const id = `component-${String(index).padStart(2, "0")}`;
+      el.setAttribute("data-component-id", id);
+
+      selectors.push({
+        name: id,
+        selector: `[data-component-id="${id}"]`,
+      });
+
+      index++;
+    }
 
     return selectors;
   });
