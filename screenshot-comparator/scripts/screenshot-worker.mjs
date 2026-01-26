@@ -566,18 +566,24 @@ async function freezeAnimations(page) {
 
 function encodeURLToFolder(url) {
   const illegalCharsRegex = /[<>:"/\\|?*\0]/g;
-  return (
-    url
-      .replace(env("STAGE_WEBSITE_URL"), "")
-      .replace(env("PROD_WEBSITE_URL"), "")
-      .replace(
-        illegalCharsRegex,
-        (char) => `%${char.charCodeAt(0).toString(16)}`
-      )
-      .replace(/^\/+/g, "")
-      .replace(/\/+$/g, "")
-      .replace(/\//g, "_") || "index"
-  );
+
+  let pathname;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    pathname = url;
+  }
+
+  if (!pathname || pathname === "/") {
+    return "index";
+  }
+
+  return pathname
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\//g, "_")
+    .replace(illegalCharsRegex, (char) =>
+      `%${char.charCodeAt(0).toString(16)}`
+    );
 }
 
 async function cropImageHeightIfNeeded(imgPath, maxHeight = 9000) {
