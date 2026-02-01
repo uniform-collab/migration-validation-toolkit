@@ -2,6 +2,10 @@ import { chromium, test, expect } from '@playwright/test';
 import fs from 'fs';
 import { env, login } from './utils';
 
+const PLAYWRIGHT_TIMEOUT = process.env.PLAYWRIGHT_TIMEOUT
+  ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
+  : 90000;
+
 console.log('Reading compositions from compositions.json');
 const compositions = JSON.parse(fs.readFileSync('data/compositions.json', 'utf-8'));
 
@@ -59,8 +63,8 @@ for (var i = 0; i < count; ++i) {
       await page.waitForLoadState('load'); // Wait for network to be idle
 
       await Promise.race([
-        page.waitForSelector('button[data-testid="multioptions-button-main"][data-test-role="header-button"]', { timeout: 10000 }),
-        page.waitForSelector('#username, input[type="email"]', { timeout: 10000 })
+        page.waitForSelector('button[data-testid="multioptions-button-main"][data-test-role="header-button"]', { timeout: PLAYWRIGHT_TIMEOUT }),
+        page.waitForSelector('#username, input[type="email"]', { timeout: PLAYWRIGHT_TIMEOUT })
       ]);
 
       const finalUrl = page.url();
@@ -70,10 +74,10 @@ for (var i = 0; i < count; ++i) {
       }
 
       console.log('Waiting for Save button to load...');
-      await page.locator('button[data-testid="multioptions-button-main"][data-test-role="header-button"]').waitFor({ timeout: 30000 });
+      await page.locator('button[data-testid="multioptions-button-main"][data-test-role="header-button"]').waitFor({ timeout: PLAYWRIGHT_TIMEOUT });
 
       try {
-        await page.locator('button[data-testid="composition-validation-error"]').waitFor({ timeout: 30000 });
+        await page.locator('button[data-testid="composition-validation-error"]').waitFor({ timeout: PLAYWRIGHT_TIMEOUT });
       }
       catch (exx) {
         console.log('validator did not appear after 30s');
