@@ -10,6 +10,7 @@ const useSitemap = process.argv.includes("--sitemap");
 const urlsFilePath = useSitemap? "./.temp/urls-sitemap.json" : "./.temp/urls.json";
 console.log(`Using URLs from: ${urlsFilePath}`);
 const urls = JSON.parse(fs.readFileSync(urlsFilePath, "utf8"));
+console.log(`Total URLs to compare: ${urls.length}`);
 
 const outputDir = "./.comparison_results";
 
@@ -18,6 +19,7 @@ if (!fs.existsSync(outputDir)) {
 }
 
 const ignoreList = loadIgnoreList();
+console.log(`Loaded ${ignoreList.length} ignore diff rules.`);
 const numWorkers = 4;
 const chunkSize = Math.ceil(urls.length / numWorkers);
 const results = [];
@@ -26,6 +28,7 @@ for (let i = 0; i < numWorkers; i++) {
   const chunk = urls.slice(i * chunkSize, (i + 1) * chunkSize);
   for (let j = 0; j < chunk.length; ++j) {
     const relativeUrl = chunk[j];
+    console.log(`\n--- Worker ${i} processing URL ${j + 1} of ${chunk.length} ---`);
 
     const prodUrl = new URL(relativeUrl, env("PROD_WEBSITE_URL")).toString();
     const migratedUrl = new URL(relativeUrl, env("STAGE_WEBSITE_URL")).toString();

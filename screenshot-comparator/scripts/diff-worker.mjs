@@ -18,13 +18,16 @@ process.on("message", async (obj) => {
 async function doWork(obj) {
   const { outputDir, prodUrl, migratedUrl, relativeUrl, ignoreList } = obj;
 
-  const prodFolder = path.join(outputDir, "prod", getFileName(prodUrl));
+  const folderName = getFileName(prodUrl);
+  console.log(`\n=== Processing URL: ${relativeUrl} | Folder: ${folderName} ===`);
+
+  const prodFolder = path.join(outputDir, "prod", folderName);
   const migratedFolder = path.join(
     outputDir,
     "migrated",
     getFileName(migratedUrl)
   );
-  const diffFolder = path.join(outputDir, "diffs", getFileName(prodUrl));
+  const diffFolder = path.join(outputDir, "diffs", folderName);
 
   const prodFiles = fs.existsSync(prodFolder)
     ? fs.readdirSync(prodFolder).filter((f) => f.endsWith("_prod.png"))
@@ -74,8 +77,10 @@ async function doWork(obj) {
       };
     }
 
+    console.log(`🔍 Comparing ${allComponentNames.size} components for URL: ${relativeUrl}`);
     for (const componentName of allComponentNames) {
       const prodImgPath = path.join(prodFolder, `${componentName}_prod.png`);
+      console.log("📷 PROD image path:", prodImgPath);
       const stageImgPath = path.join(
         migratedFolder,
         `${componentName}_migrated.png`
@@ -85,6 +90,7 @@ async function doWork(obj) {
       const prodExists = fs.existsSync(prodImgPath);
       const stageExists = fs.existsSync(stageImgPath);
 
+      console.log(`🔎 Comparing component: ${componentName} | PROD exists: ${prodExists} | MIGRATED exists: ${stageExists}`);
       if (!prodExists && stageExists) {
         const height = await getImageHeight(stageImgPath);
         if (height > 0) {
@@ -253,21 +259,27 @@ async function compareImages(prodImgPath, stageImgPath) {
   });
 }
 
-function getFileName(url) {
-  url = url.replace(env("STAGE_WEBSITE_URL"), "");
-  url = url.replace(env("PROD_WEBSITE_URL"), "");
-  url = url.startsWith("/") ? url.substring(1) : url;
+function getFileName(input) {
+  let pathname = input;
 
-  const filename = encodeURLToFilename(url);
-  return filename || "index";
-}
+  try {
+    const u = new URL(input);
+    pathname = u.pathname;
+  } catch {
+    pathname = input;
+  }
 
-function encodeURLToFilename(url) {
-  const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
-  return url.replace(
-    illegalCharsRegex,
-    (char) => `%${char.charCodeAt(0).toString(16)}`
-  );
+  pathname = pathname
+    .replace(/^\/+/, "")  
+    .replace(/\/+$/, ""); 
+
+  if (!pathname) return "index";
+
+  return pathname
+    .split("/")            
+    .filter(Boolean)
+    .join("_")             
+    .replace(/[<>:"\\|?*\0]/g, "");
 }
 
 function getDiffTag(mismatch) {
