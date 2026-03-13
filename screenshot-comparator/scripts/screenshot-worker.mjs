@@ -277,11 +277,75 @@ async function screenshotPageComponents(
     const client = await page.context().newCDPSession(page);
     //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
 
+    await waitForComponents(page, url);
     const components = await getComponentSelectors(page);
+
+    console.log(`🧩 Components collected: ${components.length} for ${url}`);
+
+    if (!components.length) {
+      console.warn(`⚠️ No components found for ${url}`);
+    }
+
 
     await screenshotComponents(url, page, components, componentDir, isStage);
   } finally {
     await page.close(); // always close the page
+  }
+}
+
+async function waitForComponents(page, url) {
+  console.log(`⏳ Waiting for components on: ${url}`);
+
+  try {
+    await page.waitForFunction(() => {
+      const main = document.querySelector("main");
+      if (!main) return false;
+
+      const scope =
+        main.querySelector("#content .row") ||
+        main.querySelector("#content") ||
+        main;
+
+      const components = scope.querySelectorAll("div.component");
+      return components.length > 0;
+    }, { timeout: 15000 });
+
+    const debug = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      const content = document.querySelector("#content");
+      const row = document.querySelector("#content .row");
+      const components = document.querySelectorAll("div.component");
+
+      return {
+        mainFound: !!main,
+        contentFound: !!content,
+        rowFound: !!row,
+        componentsCount: components.length,
+      };
+    });
+
+    console.log("✅ Components ready:", debug);
+  } catch (err) {
+    console.warn(`⚠️ waitForComponents timeout for ${url}`);
+
+    const debug = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      const content = document.querySelector("#content");
+      const row = document.querySelector("#content .row");
+      const components = document.querySelectorAll("div.component");
+
+      return {
+        title: document.title,
+        url: location.href,
+        mainFound: !!main,
+        contentFound: !!content,
+        rowFound: !!row,
+        componentsCount: components.length,
+        bodyStart: document.body?.outerHTML?.slice(0, 500) || "",
+      };
+    });
+
+    console.warn("🔍 DOM debug after timeout:", debug);
   }
 }
 
@@ -301,6 +365,21 @@ async function getComponentSelectors(page) {
       return rect.width > 0 && rect.height > 0;
     };
 
+    const isEmptyComponent = (el) => {
+      const content = el.querySelector(".component-content") || el;
+
+      const text = content.innerText.replace(/\s+/g, "").trim();
+      const hasMedia = content.querySelector(
+        "img, video, iframe, svg, canvas, picture"
+      );
+
+      const rect = el.getBoundingClientRect();
+
+      if (rect.height < 30) return true;
+
+      return text.length === 0 && !hasMedia;
+    };
+
     const main = document.querySelector("main") || document.body;
 
     const scope =
@@ -308,7 +387,11 @@ async function getComponentSelectors(page) {
       main.querySelector("#content") ||
       main;
 
-    const components = Array.from(scope.querySelectorAll("div.component"));
+      const components = Array.from(scope.children).filter(
+        (el) => el.matches("div.component")
+      );
+
+    //const components = Array.from(scope.querySelectorAll("div.component"));
 
     let index = 0;
     for (const el of components) {
@@ -316,6 +399,7 @@ async function getComponentSelectors(page) {
       if (tag === "script" || tag === "style") continue;
       if (isFixed(el)) continue;
       if (!isVisible(el)) continue;
+      if (isEmptyComponent(el)) continue;
 
       const id = `component-${String(index).padStart(2, "0")}`;
       el.setAttribute("data-component-id", id);
