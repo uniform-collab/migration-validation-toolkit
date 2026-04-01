@@ -277,13 +277,13 @@ async function screenshotPageComponents(
     const client = await page.context().newCDPSession(page);
     //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
 
-    await waitForComponents(page, url);
-    const components = await getComponentSelectors(page);
+    await waitForMainSections(page, url);
+    const components = await getSectionSelectors(page);
 
-    console.log(`🧩 Components collected: ${components.length} for ${url}`);
+    console.log(`🧩 Sections collected: ${components.length} for ${url}`);
 
     if (!components.length) {
-      console.warn(`⚠️ No components found for ${url}`);
+      console.warn(`⚠️ No sections found for ${url}`);
     }
 
 
@@ -293,54 +293,63 @@ async function screenshotPageComponents(
   }
 }
 
-async function waitForComponents(page, url) {
-  console.log(`⏳ Waiting for components on: ${url}`);
+async function waitForMainSections(page, url) {
+  console.log(`⏳ Waiting for main sections on: ${url}`);
 
   try {
     await page.waitForFunction(() => {
       const main = document.querySelector("main");
       if (!main) return false;
-
-      const scope =
-        main.querySelector("#content .row") ||
-        main.querySelector("#content") ||
-        main;
-
-      const components = scope.querySelectorAll("div.component");
-      return components.length > 0;
+      const scope = main.querySelector("#content") || main;
+      return Array.from(scope.children).some(
+        (el) =>
+          el.nodeType === 1 &&
+          el.tagName !== "SCRIPT" &&
+          el.tagName !== "STYLE"
+      );
     }, { timeout: 15000 });
 
     const debug = await page.evaluate(() => {
       const main = document.querySelector("main");
-      const content = document.querySelector("#content");
-      const row = document.querySelector("#content .row");
-      const components = document.querySelectorAll("div.component");
+      const scope = main && (main.querySelector("#content") || main);
+      const sections = scope
+        ? Array.from(scope.children).filter(
+            (el) =>
+              el.nodeType === 1 &&
+              el.tagName !== "SCRIPT" &&
+              el.tagName !== "STYLE"
+          )
+        : [];
 
       return {
         mainFound: !!main,
-        contentFound: !!content,
-        rowFound: !!row,
-        componentsCount: components.length,
+        contentFound: !!(main && main.querySelector("#content")),
+        sectionCount: sections.length,
       };
     });
 
-    console.log("✅ Components ready:", debug);
+    console.log("✅ Sections ready:", debug);
   } catch (err) {
-    console.warn(`⚠️ waitForComponents timeout for ${url}`);
+    console.warn(`⚠️ waitForMainSections timeout for ${url}`);
 
     const debug = await page.evaluate(() => {
       const main = document.querySelector("main");
-      const content = document.querySelector("#content");
-      const row = document.querySelector("#content .row");
-      const components = document.querySelectorAll("div.component");
+      const scope = main && (main.querySelector("#content") || main);
+      const sections = scope
+        ? Array.from(scope.children).filter(
+            (el) =>
+              el.nodeType === 1 &&
+              el.tagName !== "SCRIPT" &&
+              el.tagName !== "STYLE"
+          )
+        : [];
 
       return {
         title: document.title,
         url: location.href,
         mainFound: !!main,
-        contentFound: !!content,
-        rowFound: !!row,
-        componentsCount: components.length,
+        contentFound: !!(main && main.querySelector("#content")),
+        sectionCount: sections.length,
         bodyStart: document.body?.outerHTML?.slice(0, 500) || "",
       };
     });
@@ -349,7 +358,7 @@ async function waitForComponents(page, url) {
   }
 }
 
-async function getComponentSelectors(page) {
+async function getSectionSelectors(page) {
   return await page.evaluate(() => {
     const selectors = [];
 
@@ -365,7 +374,7 @@ async function getComponentSelectors(page) {
       return rect.width > 0 && rect.height > 0;
     };
 
-    const isEmptyComponent = (el) => {
+    const isEmptyBlock = (el) => {
       const content = el.querySelector(".component-content") || el;
 
       const text = content.innerText.replace(/\s+/g, "").trim();
@@ -381,25 +390,20 @@ async function getComponentSelectors(page) {
     };
 
     const main = document.querySelector("main") || document.body;
+    const scope = main.querySelector("#content") || main;
 
-    const scope =
-      main.querySelector("#content .row") ||
-      main.querySelector("#content") ||
-      main;
-
-      const components = Array.from(scope.children).filter(
-        (el) => el.matches("div.component")
-      );
-
-    //const components = Array.from(scope.querySelectorAll("div.component"));
+    const sections = Array.from(scope.children).filter(
+      (el) =>
+        el.nodeType === 1 &&
+        el.tagName !== "SCRIPT" &&
+        el.tagName !== "STYLE"
+    );
 
     let index = 0;
-    for (const el of components) {
-      const tag = el.tagName.toLowerCase();
-      if (tag === "script" || tag === "style") continue;
+    for (const el of sections) {
       if (isFixed(el)) continue;
       if (!isVisible(el)) continue;
-      if (isEmptyComponent(el)) continue;
+      if (isEmptyBlock(el)) continue;
 
       const id = `component-${String(index).padStart(2, "0")}`;
       el.setAttribute("data-component-id", id);
