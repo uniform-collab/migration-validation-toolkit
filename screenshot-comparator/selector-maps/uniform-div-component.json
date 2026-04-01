@@ -1,0 +1,7 @@
+{
+  "scopeSelectors": ["main #content .row", "main #content", "main"],
+  "items": {
+    "strategy": "querySelectorAll",
+    "selector": "div.component"
+  }
+}

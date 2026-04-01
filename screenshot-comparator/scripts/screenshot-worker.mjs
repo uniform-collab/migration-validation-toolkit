@@ -9,9 +9,12 @@ import {
   extractCandidateUrl,
   isAllowedMediaUrl,
 } from "./utils.js";
+import { loadSelectorMap } from "./selector-map.js";
 import dotenv from "dotenv";
 import sharp from "sharp";
 dotenv.config();
+
+const selectorMap = loadSelectorMap();
 
 // Shared browser and context reused across tasks
 const browser = await chromium.launch({
@@ -277,8 +280,8 @@ async function screenshotPageComponents(
     const client = await page.context().newCDPSession(page);
     //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
 
-    await waitForMainSections(page, url);
-    const components = await getSectionSelectors(page);
+    await waitForCaptureTargets(page, url, selectorMap);
+    const components = await getCaptureSelectors(page, selectorMap);
 
     console.log(`🧩 Sections collected: ${components.length} for ${url}`);
 
@@ -293,73 +296,97 @@ async function screenshotPageComponents(
   }
 }
 
-async function waitForMainSections(page, url) {
-  console.log(`⏳ Waiting for main sections on: ${url}`);
+async function waitForCaptureTargets(page, url, map) {
+  console.log(`⏳ Waiting for sections (selector map) on: ${url}`);
 
   try {
-    await page.waitForFunction(() => {
-      const main = document.querySelector("main");
-      if (!main) return false;
-      const scope = main.querySelector("#content") || main;
-      return Array.from(scope.children).some(
-        (el) =>
-          el.nodeType === 1 &&
-          el.tagName !== "SCRIPT" &&
-          el.tagName !== "STYLE"
-      );
-    }, { timeout: 15000 });
-
-    const debug = await page.evaluate(() => {
-      const main = document.querySelector("main");
-      const scope = main && (main.querySelector("#content") || main);
-      const sections = scope
-        ? Array.from(scope.children).filter(
+    await page.waitForFunction(
+      (m) => {
+        const { scope } = (() => {
+          for (const sel of m.scopeSelectors) {
+            const el = document.querySelector(sel);
+            if (el) return { scope: el };
+          }
+          return { scope: null };
+        })();
+        if (!scope) return false;
+        if (m.items.strategy === "directChildren") {
+          return Array.from(scope.children).some(
             (el) =>
               el.nodeType === 1 &&
               el.tagName !== "SCRIPT" &&
               el.tagName !== "STYLE"
-          )
+          );
+        }
+        return scope.querySelectorAll(m.items.selector).length > 0;
+      },
+      map,
+      { timeout: 15000 }
+    );
+
+    const debug = await page.evaluate((m) => {
+      const { scope, matchedSelector } = (() => {
+        for (const sel of m.scopeSelectors) {
+          const el = document.querySelector(sel);
+          if (el) return { scope: el, matchedSelector: sel };
+        }
+        return { scope: null, matchedSelector: null };
+      })();
+      const raw = scope
+        ? m.items.strategy === "directChildren"
+          ? Array.from(scope.children).filter(
+              (el) =>
+                el.nodeType === 1 &&
+                el.tagName !== "SCRIPT" &&
+                el.tagName !== "STYLE"
+            )
+          : Array.from(scope.querySelectorAll(m.items.selector))
         : [];
 
       return {
-        mainFound: !!main,
-        contentFound: !!(main && main.querySelector("#content")),
-        sectionCount: sections.length,
+        scopeMatched: matchedSelector,
+        rawTargetCount: raw.length,
       };
-    });
+    }, map);
 
     console.log("✅ Sections ready:", debug);
   } catch (err) {
-    console.warn(`⚠️ waitForMainSections timeout for ${url}`);
+    console.warn(`⚠️ waitForCaptureTargets timeout for ${url}`);
 
-    const debug = await page.evaluate(() => {
-      const main = document.querySelector("main");
-      const scope = main && (main.querySelector("#content") || main);
-      const sections = scope
-        ? Array.from(scope.children).filter(
-            (el) =>
-              el.nodeType === 1 &&
-              el.tagName !== "SCRIPT" &&
-              el.tagName !== "STYLE"
-          )
+    const debug = await page.evaluate((m) => {
+      const { scope, matchedSelector } = (() => {
+        for (const sel of m.scopeSelectors) {
+          const el = document.querySelector(sel);
+          if (el) return { scope: el, matchedSelector: sel };
+        }
+        return { scope: null, matchedSelector: null };
+      })();
+      const raw = scope
+        ? m.items.strategy === "directChildren"
+          ? Array.from(scope.children).filter(
+              (el) =>
+                el.nodeType === 1 &&
+                el.tagName !== "SCRIPT" &&
+                el.tagName !== "STYLE"
+            )
+          : Array.from(scope.querySelectorAll(m.items.selector))
         : [];
 
       return {
         title: document.title,
         url: location.href,
-        mainFound: !!main,
-        contentFound: !!(main && main.querySelector("#content")),
-        sectionCount: sections.length,
+        scopeMatched: matchedSelector,
+        rawTargetCount: raw.length,
         bodyStart: document.body?.outerHTML?.slice(0, 500) || "",
       };
-    });
+    }, map);
 
     console.warn("🔍 DOM debug after timeout:", debug);
   }
 }
 
-async function getSectionSelectors(page) {
-  return await page.evaluate(() => {
+async function getCaptureSelectors(page, map) {
+  return await page.evaluate((m) => {
     const selectors = [];
 
     const isFixed = (el) => {
@@ -389,15 +416,27 @@ async function getSectionSelectors(page) {
       return text.length === 0 && !hasMedia;
     };
 
-    const main = document.querySelector("main") || document.body;
-    const scope = main.querySelector("#content") || main;
+    let scope = null;
+    for (const sel of m.scopeSelectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        scope = el;
+        break;
+      }
+    }
+    if (!scope) {
+      return selectors;
+    }
 
-    const sections = Array.from(scope.children).filter(
-      (el) =>
-        el.nodeType === 1 &&
-        el.tagName !== "SCRIPT" &&
-        el.tagName !== "STYLE"
-    );
+    const sections =
+      m.items.strategy === "directChildren"
+        ? Array.from(scope.children).filter(
+            (el) =>
+              el.nodeType === 1 &&
+              el.tagName !== "SCRIPT" &&
+              el.tagName !== "STYLE"
+          )
+        : Array.from(scope.querySelectorAll(m.items.selector));
 
     let index = 0;
     for (const el of sections) {
@@ -417,7 +456,7 @@ async function getSectionSelectors(page) {
     }
 
     return selectors;
-  });
+  }, map);
 }
 
 async function screenshotComponents(url, page, components, outputDir, isStage) {
@@ -429,7 +468,7 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
         continue;
       }
 
-      const box = await element.boundingBox();
+      let box = await element.boundingBox();
       if (!box || box.width === 0 || box.height === 0) {
         console.warn(
           `⚠️ Skipping invisible component: ${comp.name}, width: ${
@@ -468,13 +507,6 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
         { selector: comp.selector, compName: comp.name }
       );
 
-      const roundedBox = {
-        x: Math.floor(box.x),
-        y: Math.floor(box.y),
-        width: Math.ceil(box.width),
-        height: Math.ceil(box.height),
-      };
-
       const filePath = path.join(
         outputDir,
         `${comp.name}${isStage ? "_migrated" : "_prod"}.png`
@@ -508,8 +540,15 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
       // Final buffer before capture for extra stability
       await page.waitForTimeout(300);
 
-      // Capture the screenshot
-      await element.screenshot({ path: filePath, clip: roundedBox });
+      // Do not pass boundingBox() as clip: it is viewport-relative, while
+      // element.screenshot({ clip }) is relative to the element (wrong clip = random crop).
+      box = await element.boundingBox();
+      if (!box || box.width === 0 || box.height === 0) {
+        console.warn(`⚠️ Skipping screenshot ${comp.name}: no layout box after scroll`);
+        continue;
+      }
+
+      await element.screenshot({ path: filePath });
 
       // Crop height if necessary
       await cropImageHeightIfNeeded(filePath, 9000);

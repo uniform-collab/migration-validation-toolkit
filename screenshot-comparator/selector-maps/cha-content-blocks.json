@@ -1,0 +1,7 @@
+{
+  "scopeSelectors": ["main #content", "main"],
+  "items": {
+    "strategy": "querySelectorAll",
+    "selector": ".cha-card-component, .promo-card-component, .topic-listing-component, .generic_hero, .detail_hero, .associated_people-alt, .rte.article_detail"
+  }
+}

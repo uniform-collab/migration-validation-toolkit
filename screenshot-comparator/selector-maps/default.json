@@ -1,0 +1,6 @@
+{
+  "scopeSelectors": ["main #content", "main"],
+  "items": {
+    "strategy": "directChildren"
+  }
+}
