@@ -2,7 +2,6 @@ import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 import {
-  env,
   retryWithBackoff,
   isGif,
   isVideo,
@@ -13,17 +12,13 @@ import dotenv from "dotenv";
 import sharp from "sharp";
 dotenv.config();
 
-// Shared browser and context reused across tasks
-const browser = await chromium.launch({
-  //headless: false,
-});
+const browser = await chromium.launch();
 
 const PLAYWRIGHT_TIMEOUT = process.env.PLAYWRIGHT_TIMEOUT
   ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
   : 90000;
 
 process.on("SIGTERM", async () => {
-  console.log("Worker received termination signal. Cleaning up...");
   await browser.close();
   process.exit(0);
 });
@@ -32,8 +27,7 @@ process.on("message", async (obj) => {
   const start = Date.now();
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
-    serviceWorkers: "block", // prevent SW from hijacking requests
-    reducedMotion: "reduce",
+    serviceWorkers: "block",
   });
 
   let result = false;
@@ -41,18 +35,16 @@ process.on("message", async (obj) => {
     result = await Promise.race([
       doWork(obj, context),
       new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error("💣 Global task timeout (e.g. 2.5 min)")),
-          150_000
-        )
+        setTimeout(() => reject(new Error("timeout")), 150000)
       ),
     ]);
   } catch (err) {
-    console.error(`🆘 Worker error:`, err);
+    console.error("🆘 Worker error:", err);
   } finally {
-    const duration = ((Date.now() - start) / 1000).toFixed(1);
     console.log(
-      result ? `✅ Task done (${duration}s)` : `🆘 Task failed (${duration}s)`
+      result
+        ? `✅ Done (${((Date.now() - start) / 1000).toFixed(1)}s)`
+        : "❌ Failed"
     );
     await context.close();
     process.send(result);
@@ -67,7 +59,8 @@ async function doWork(obj, context) {
       await screenshotPageComponents(
         context,
         prodUrl,
-        ".comparison_results/prod"
+        ".comparison_results/prod",
+        false
       );
     }
     if (!prodOnly) {
@@ -79,8 +72,8 @@ async function doWork(obj, context) {
       );
     }
     return true;
-  } catch (error) {
-    console.error(`🆘 Error processing ${prodUrl}:`, error);
+  } catch (e) {
+    console.error(e);
     return false;
   }
 }
@@ -92,282 +85,92 @@ async function screenshotPageComponents(
   isStage = false
 ) {
   const componentDir = path.join(baseDir, encodeURLToFolder(url));
-  if (fs.existsSync(componentDir)) {
-    console.log(`📂 Skipping existing directory: ${componentDir}`);
-    return;
-  }
+  fs.mkdirSync(componentDir, { recursive: true });
 
   const page = await context.newPage();
 
-  const blockedUrls = [];
-
   await page.route("**/*", (route) => {
     const req = route.request();
-    const rawUrl = req.url();
+    const url = extractCandidateUrl(req.url()).toLowerCase();
 
-    // unwrap proxies like /_next/image?url=...
-    const url = extractCandidateUrl(rawUrl).toLowerCase();
+    if (isAllowedMediaUrl(url)) return route.continue();
+    if (isGif(url) || isVideo(url)) return route.abort();
 
-    // ✅ allowlist: do not block clarity pixel
-    if (isAllowedMediaUrl(url)) {
-      return route.continue();
-    }
-
-    if (isGif(url)) {
-      blockedUrls.push(url);
-      console.log("🚫 GIF blocked:", url);
-      return route.abort();
-    }
-    if (isVideo(url, req.resourceType())) {
-      blockedUrls.push(url);
-      console.log("🚫 VIDEO blocked:", url);
-      return route.abort();
-    }
-    if (/\.(m3u8|mpd|ts|m4s)(\?|#|$)/.test(url)) {
-      blockedUrls.push(url);
-      console.log("🚫 STREAM blocked:", url);
-      return route.abort();
-    }
     return route.continue();
   });
 
-  try {
-    if (isStage && process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-      await page.setExtraHTTPHeaders({
-        "x-vercel-protection-bypass":
-          process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
-        "x-vercel-set-bypass-cookie": "true",
-      });
+  console.log(`🌐 ${url}`);
+
+  await retryWithBackoff(
+    () =>
+      page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: PLAYWRIGHT_TIMEOUT,
+      }),
+    1,
+    2000,
+    PLAYWRIGHT_TIMEOUT
+  );
+
+  await page.waitForTimeout(5000);
+
+  // ✅ УДАЛЯЕМ БАННЕР ВЕЗДЕ (prod + stage)
+  await page.evaluate(() => {
+    const el = document.querySelector("#full-width-shoehorn");
+    if (el) {
+      console.log("🗑️ Removing #full-width-shoehorn");
+      el.remove();
     }
+  });
 
-    console.log(`🌐 Navigating to URL: ${url}`);
-    const parsedUrl = new URL(url);
-    const searchTerm = parsedUrl.searchParams.get("searchTerm");
+  await waitForComponents(page, url, isStage);
 
-    try {
-      if (searchTerm) {
-        parsedUrl.searchParams.delete("searchTerm");
-        const cleanUrl = parsedUrl.toString();
-        await retryWithBackoff(
-          () =>
-            page.goto(cleanUrl, {
-              waitUntil: "load",
-              timeout: PLAYWRIGHT_TIMEOUT,
-            }),
-          1,
-          5000,
-          PLAYWRIGHT_TIMEOUT
-        );
+  const { selectors: components, stats } = await getComponentSelectors(
+    page,
+    isStage
+  );
 
-        console.log(`🔎 Performing search for "${searchTerm}" on URL: ${url}`);
-        await page.waitForSelector(
-          'input[placeholder="What can we help you find?"]',
-          { timeout: 10000 }
-        );
-        await page.fill(
-          'input[placeholder="What can we help you find?"]',
-          searchTerm
-        );
-        await page.click('button[aria-label="search-button"]');
-        await page.waitForTimeout(10000);
-      } else {
-        await retryWithBackoff(
-          () =>
-            page.goto(url, {
-              waitUntil: "networkidle",
-              timeout: PLAYWRIGHT_TIMEOUT,
-            }),
-          1,
-          5000,
-          PLAYWRIGHT_TIMEOUT
-        );
+  console.log("COMPONENT FILTER STATS:", stats);
+  console.log(`🧩 Components collected: ${components.length}`);
 
-        await page.waitForTimeout(5000); // ⏳ wait 5 seconds before screenshot
-      }
-    } catch (err) {
-      if (err.name === "TimeoutError") {
-        // if timeout, do screenshot with what is loaded - maybe a video on the page
-        console.warn(
-          `⏰ Timeout navigating to ${url}, proceeding with screenshot`
-        );
-      } else {
-        console.error(`🆘 Error navigating to ${url}:`, err);
-      }
-    }
+  await screenshotComponents(page, components, componentDir, isStage);
 
-    const finalUrl = page.url();
-    const redirected = finalUrl !== url;
-
-    const componentDir = path.join(baseDir, encodeURLToFolder(url));
-    fs.mkdirSync(componentDir, { recursive: true });
-
-    if (redirected) {
-      console.warn(`⛔ Redirect detected: ${url} → ${finalUrl}`);
-      const redirectFile = path.join(componentDir, "redirect.txt");
-      fs.writeFileSync(redirectFile, finalUrl, { encoding: "utf8" });
-    }
-
-    if (blockedUrls.length > 0) {
-      console.warn(`🚫 Blocked URLs: ${blockedUrls.length} items`);
-      const blockedUrlsPath = path.join(componentDir, "blocked-urls.txt");
-      try {
-        fs.writeFileSync(
-          blockedUrlsPath,
-          (blockedUrls || []).join("\n") + (blockedUrls.length ? "\n" : ""),
-          "utf8"
-        );
-        console.log(`📝 Blocked URLs saved: ${blockedUrlsPath}`);
-      } catch (e) {
-        console.warn(`⚠️ Failed to write Blocked URLs: ${e.message}`);
-      }
-    }
-
-    // Nudge lazy loaders to populate attributes (requests are still blocked by route)
-    await page.evaluate(async () => {
-      const total = Math.max(
-        document.body.scrollHeight,
-        document.documentElement.scrollHeight
-      );
-      let y = 0;
-      while (y < total) {
-        window.scrollTo(0, y);
-        await new Promise((r) => setTimeout(r, 60));
-        y += window.innerHeight * 0.9;
-      }
-      window.scrollTo(0, 0);
-    });
-
-    // 🔥 https://cobham-satcom.com customization remove after
-    const isPageNotFound = await page.evaluate(() => {
-      const title = (document.title || "").toLowerCase();
-      const bodyText = (document.body?.innerText || "").toLowerCase();
-      return (
-        title.includes("page not found") || bodyText.includes("page not found")
-      );
-    });
-
-    if (isPageNotFound) {
-      console.warn(`🚫 Skipping "Page not found" page: ${url}`);
-      return;
-    }
-
-    // 🔥 https://cobham-satcom.com customization remove after
-    await page.evaluate(() => {
-      document.querySelectorAll('div[id^="embed_"]').forEach((el) => {
-        console.log("🗑️ Removing embed div:", el.id);
-        el.remove();
-      });
-      document.querySelectorAll('[class*="breadcrumb"]').forEach((el) => {
-        console.log("🗑️ Removing breadcrumb element:", el.className);
-        el.remove();
-      });
-      const header = document.querySelector('[data-segment-category="Header"]');
-      if (header) {
-        const style = getComputedStyle(header);
-        if (style.position === "sticky") {
-          header.style.position = "static";
-          header.style.top = "auto";
-          console.log("🧷 Sticky header disabled");
-        }
-      }
-    });
-
-    await freezeAnimations(page);
-
-    const client = await page.context().newCDPSession(page);
-    //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
-
-    await waitForComponents(page, url);
-    const { selectors: components, stats } = await getComponentSelectors(page);
-
-    console.log("COMPONENT FILTER STATS:", stats);
-    console.log(`🧩 Components collected: ${components.length} for ${url}`);
-
-    if (!components.length) {
-      console.warn(`⚠️ No components found for ${url}`);
-    }
-
-    await screenshotComponents(url, page, components, componentDir, isStage);
-  } finally {
-    await page.close(); // always close the page
-  }
+  await page.close();
 }
 
-async function waitForComponents(page, url) {
-  console.log(`⏳ Waiting for components on: ${url}`);
+async function waitForComponents(page, url, isStage) {
+  console.log("⏳ Waiting for components...");
 
-  try {
-    await page.waitForFunction(() => {
+  await page.waitForFunction(
+    (isStage) => {
       const main = document.querySelector("main");
       if (!main) return false;
 
-      const scope =
-        main.querySelector("#content-shoehorned") ||
-        main.querySelector("#content") ||
-        main;
+      const scope = isStage
+        ? main.querySelector("#content .row") ||
+          main.querySelector("#content") ||
+          main.querySelector("#content-shoehorned") ||
+          main
+        : main.querySelector("#content-shoehorned") ||
+          main.querySelector("#content .row") ||
+          main.querySelector("#content") ||
+          main;
 
-      const components = scope.querySelectorAll("div.component");
+      const components = isStage
+        ? Array.from(scope.children).filter((el) =>
+            el.matches("div.component")
+          )
+        : scope.querySelectorAll("div.component");
+
       return components.length > 0;
-    }, { timeout: 15000 });
-
-    const debug = await page.evaluate(() => {
-      const main = document.querySelector("main");
-      const content = document.querySelector("#content");
-      const shoehorned = document.querySelector("#content-shoehorned");
-
-      const scope =
-        main?.querySelector("#content-shoehorned") ||
-        main?.querySelector("#content") ||
-        main;
-
-      const components = scope?.querySelectorAll("div.component") || [];
-      const rows = scope?.querySelectorAll(".row") || [];
-
-      return {
-        mainFound: !!main,
-        contentFound: !!content,
-        shoehornedFound: !!shoehorned,
-        rowsFound: rows.length,
-        componentsCount: components.length,
-      };
-    });
-
-    console.log("✅ Components ready:", debug);
-  } catch (err) {
-    console.warn(`⚠️ waitForComponents timeout for ${url}`);
-
-    const debug = await page.evaluate(() => {
-      const main = document.querySelector("main");
-      const content = document.querySelector("#content");
-      const shoehorned = document.querySelector("#content-shoehorned");
-
-      const scope =
-        main?.querySelector("#content-shoehorned") ||
-        main?.querySelector("#content") ||
-        main;
-
-      const components = scope?.querySelectorAll("div.component") || [];
-      const rows = scope?.querySelectorAll(".row") || [];
-
-      return {
-        title: document.title,
-        url: location.href,
-        mainFound: !!main,
-        contentFound: !!content,
-        shoehornedFound: !!shoehorned,
-        rowsFound: rows.length,
-        componentsCount: components.length,
-        bodyStart: document.body?.outerHTML?.slice(0, 500) || "",
-      };
-    });
-
-    console.warn("🔍 DOM debug after timeout:", debug);
-  }
+    },
+    isStage,
+    { timeout: 15000 }
+  );
 }
 
-async function getComponentSelectors(page) {
-  return await page.evaluate(() => {
-    const selectors = [];
+async function getComponentSelectors(page, isStage) {
+  return await page.evaluate((isStage) => {
     const stats = {
       total: 0,
       hidden: 0,
@@ -377,35 +180,29 @@ async function getComponentSelectors(page) {
       kept: 0,
     };
 
-    const isFixed = (el) => getComputedStyle(el).position === "fixed";
-
-    const isVisible = (el) => {
-      const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") return false;
-
-      const rect = el.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    };
-
-    const isEmptyComponent = (el) => {
-      const content = el.querySelector(".component-content") || el;
-      const text = (content.innerText || "").replace(/\s+/g, "").trim();
-      const hasMedia = !!content.querySelector(
-        "img, video, iframe, svg, canvas, picture"
-      );
-      return text.length === 0 && !hasMedia;
-    };
-
     const main = document.querySelector("main") || document.body;
-    const scope =
-      main.querySelector("#content-shoehorned") ||
-      main.querySelector("#content") ||
-      main;
 
-    const components = Array.from(scope.querySelectorAll("div.component"));
+    const scope = isStage
+      ? main.querySelector("#content .row") ||
+        main.querySelector("#content") ||
+        main.querySelector("#content-shoehorned") ||
+        main
+      : main.querySelector("#content-shoehorned") ||
+        main.querySelector("#content .row") ||
+        main.querySelector("#content") ||
+        main;
+
+    const components = isStage
+      ? Array.from(scope.children).filter((el) =>
+          el.matches("div.component")
+        )
+      : Array.from(scope.querySelectorAll("div.component"));
+
     stats.total = components.length;
 
+    const selectors = [];
     let index = 0;
+
     for (const el of components) {
       const style = getComputedStyle(el);
 
@@ -413,15 +210,25 @@ async function getComponentSelectors(page) {
         stats.hidden++;
         continue;
       }
-      if (isFixed(el)) {
+
+      if (style.position === "fixed") {
         stats.fixed++;
         continue;
       }
-      if (!isVisible(el)) {
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
         stats.invisible++;
         continue;
       }
-      if (isEmptyComponent(el)) {
+
+      const content = el.querySelector(".component-content") || el;
+      const text = (content.innerText || "").trim();
+      const hasMedia = !!content.querySelector(
+        "img, video, iframe, svg, canvas, picture"
+      );
+
+      if (!text && !hasMedia) {
         stats.empty++;
         continue;
       }
@@ -439,276 +246,55 @@ async function getComponentSelectors(page) {
     }
 
     return { selectors, stats };
-  });
+  }, isStage);
 }
 
-async function screenshotComponents(url, page, components, outputDir, isStage) {
+async function screenshotComponents(page, components, outputDir, isStage) {
   for (const comp of components) {
     try {
-      const element = await page.$(comp.selector);
-      if (!element) {
-        console.warn(`⚠️ Selector not found: ${comp.selector}`);
-        continue;
-      }
+      const el = await page.$(comp.selector);
+      if (!el) continue;
 
-      const box = await element.boundingBox();
-      if (!box || box.width === 0 || box.height === 0) {
-        console.warn(
-          `⚠️ Skipping invisible component: ${comp.name}, width: ${
-            box ? box.width : "N/A"
-          }, height: ${box ? box.height : "N/A"}`
-        );
-        continue;
-      }
-
-      // ⛔ Hide all position: fixed elements (except the one we're capturing)
-      // ⛔ Also hide the header if current component is not header
-      await page.evaluate(
-        ({ selector, compName }) => {
-          const all = Array.from(document.body.querySelectorAll("*"));
-
-          const isHeaderComponent = compName === "header";
-          const header = document.querySelector("header");
-
-          all.forEach((el) => {
-            const style = window.getComputedStyle(el);
-            const isFixed = style.position === "fixed";
-            const isHeader = el === header;
-
-            if (
-              (isFixed || (!isHeaderComponent && isHeader)) &&
-              !el.matches(selector)
-            ) {
-              el.setAttribute(
-                "data-original-visibility",
-                el.style.visibility || ""
-              );
-              el.style.visibility = "hidden";
-            }
-          });
-        },
-        { selector: comp.selector, compName: comp.name }
+      await el.evaluate((e) =>
+        e.scrollIntoView({ behavior: "auto", block: "center" })
       );
 
-      const roundedBox = {
-        x: Math.floor(box.x),
-        y: Math.floor(box.y),
-        width: Math.ceil(box.width),
-        height: Math.ceil(box.height),
-      };
+      await page.waitForTimeout(500);
 
       const filePath = path.join(
         outputDir,
         `${comp.name}${isStage ? "_migrated" : "_prod"}.png`
       );
 
-      // Scroll component into view to trigger lazy loading
-      await element.evaluate((el) =>
-        el.scrollIntoView({ behavior: "auto", block: "center" })
-      );
+      await el.screenshot({ path: filePath });
 
-      // Give the browser some time to render any lazy-loaded content
-      await page.waitForTimeout(500);
+      await cropImageHeightIfNeeded(filePath);
 
-      // Wait until all images within the component are fully loaded
-      await Promise.race([
-        element.evaluate(async (el) => {
-          const images = el.querySelectorAll("img");
-          await Promise.all(
-            Array.from(images).map((img) => {
-              if (img.complete) return Promise.resolve();
-              return new Promise((resolve) => {
-                img.onload = () => resolve();
-                img.onerror = () => resolve();
-              });
-            })
-          );
-        }),
-        page.waitForTimeout(5000),
-      ]);
-
-      // Final buffer before capture for extra stability
-      await page.waitForTimeout(300);
-
-      // Capture the screenshot
-      await element.screenshot({ path: filePath, clip: roundedBox });
-
-      // Crop height if necessary
-      await cropImageHeightIfNeeded(filePath, 9000);
-
-      // ✅ Restore fixed elements
-      await page.evaluate(() => {
-        const allHidden = document.querySelectorAll(
-          "[data-original-visibility]"
-        );
-        allHidden.forEach((el) => {
-          const original = el.getAttribute("data-original-visibility");
-          el.style.visibility = original || "";
-          el.removeAttribute("data-original-visibility");
-        });
-      });
-
-      console.log(`📸 Component screenshot saved: ${filePath}`);
-    } catch (err) {
-      console.error(
-        `🆘 Failed to screenshot ${comp.name} - ${url}:`,
-        err.message
-      );
+      console.log("📸", filePath);
+    } catch (e) {
+      console.warn("⚠️ screenshot failed:", comp.name);
     }
   }
-}
-
-async function freezeAnimations(page) {
-  await page.addStyleTag({
-    content: `
-      * {
-        animation: none !important;
-        transition: none !important;
-        transform: none !important;
-      }
-      *::before,
-      *::after {
-        animation: none !important;
-        transition: none !important;
-      }
-      [class*="carousel"],
-      [class*="slider"],
-      [class*="marquee"],
-      [class*="animated"] {
-        animation: none !important;
-        transition: none !important;
-        transform: none !important;
-      }
-      video {
-        object-position: 0% 0% !important;
-      }
-    `,
-  });
-
-  await page.waitForTimeout(1000);
-
-  await page.evaluate(async () => {
-    window.requestAnimationFrame = () => {};
-    window.setInterval = () => 0;
-    window.setTimeout = () => 0;
-
-    document.querySelectorAll("video").forEach((video) => {
-      try {
-        video.pause();
-      } catch (e) {}
-    });
-
-    const freezeSingleGif = async (imgElement) => {
-      return new Promise((resolve) => {
-        try {
-          const src = imgElement.src;
-          const tempImg = new Image();
-          tempImg.crossOrigin = "anonymous";
-          tempImg.src =
-            src +
-            (src.includes("?")
-              ? "&freezeCacheBust=" + Date.now()
-              : "?freezeCacheBust=" + Date.now());
-
-          tempImg.onload = () => {
-            try {
-              const canvas = document.createElement("canvas");
-              canvas.width = tempImg.naturalWidth;
-              canvas.height = tempImg.naturalHeight;
-              const ctx = canvas.getContext("2d");
-              ctx.drawImage(tempImg, 0, 0);
-              const still = canvas.toDataURL("image/png");
-              imgElement.src = still;
-              resolve();
-            } catch (e) {
-              console.warn("❄️ Failed to draw GIF:", src, e);
-              resolve();
-            }
-          };
-
-          tempImg.onerror = () => {
-            console.warn("❄️ Failed to load GIF:", src);
-            resolve();
-          };
-        } catch (err) {
-          console.warn("❄️ Unexpected error freezing GIF:", err);
-          resolve();
-        }
-      });
-    };
-
-    const gifImgs = [...document.querySelectorAll('img[src$=".gif"]')];
-    await Promise.all(gifImgs.map(freezeSingleGif));
-
-    try {
-      const rmcTrack = document.querySelector(".react-multi-carousel-track");
-      if (rmcTrack) {
-        rmcTrack.style.transition = "none";
-        rmcTrack.style.transform = getComputedStyle(rmcTrack).transform;
-
-        const originalSetInterval = window.setInterval;
-        const originalClearInterval = window.clearInterval;
-        const activeIntervals = [];
-
-        window.setInterval = function (...args) {
-          const id = originalSetInterval(...args);
-          activeIntervals.push(id);
-          return id;
-        };
-
-        setTimeout(() => {
-          activeIntervals.forEach((id) => originalClearInterval(id));
-        }, 50);
-      }
-    } catch (e) {
-      console.warn("❄️ Failed to freeze react-multi-carousel:", e);
-    }
-
-    const toastEl = document.querySelector(
-      '[id^="nextjs-toast"], .nextjs-toast-container, .nextjs-toast'
-    );
-    if (toastEl) {
-      toastEl.remove();
-      console.log("🔥 Removed nextjs-toast element from DOM");
-    }
-  });
 }
 
 function encodeURLToFolder(url) {
-  const illegalCharsRegex = /[<>:"/\\|?*\0]/g;
-
-  let pathname;
   try {
-    pathname = new URL(url).pathname;
+    const p = new URL(url).pathname;
+    if (!p || p === "/") return "index";
+    return p.replace(/\//g, "_");
   } catch {
-    pathname = url;
-  }
-
-  if (!pathname || pathname === "/") {
     return "index";
   }
-
-  return pathname
-    .replace(/^\/+|\/+$/g, "")
-    .replace(/\//g, "_")
-    .replace(illegalCharsRegex, (char) =>
-      `%${char.charCodeAt(0).toString(16)}`
-    );
 }
 
 async function cropImageHeightIfNeeded(imgPath, maxHeight = 9000) {
   try {
-    const image = sharp(imgPath);
-    const metadata = await image.metadata();
-    if (metadata.height > maxHeight) {
-      console.log(
-        `✂️ Trimming image ${imgPath} from ${metadata.height}px to ${maxHeight}px`
-      );
-      await image
-        .extract({ top: 0, left: 0, width: metadata.width, height: maxHeight })
-        .toFile(imgPath); // overwrite
+    const img = sharp(imgPath);
+    const meta = await img.metadata();
+    if (meta.height > maxHeight) {
+      await img
+        .extract({ top: 0, left: 0, width: meta.width, height: maxHeight })
+        .toFile(imgPath);
     }
-  } catch (e) {
-    console.warn(`⚠️ Could not crop ${imgPath}: ${e.message}`);
-  }
+  } catch {}
 }
