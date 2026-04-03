@@ -278,14 +278,14 @@ async function screenshotPageComponents(
     //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
 
     await waitForComponents(page, url);
-    const components = await getComponentSelectors(page);
+    const { selectors: components, stats } = await getComponentSelectors(page);
 
+    console.log("COMPONENT FILTER STATS:", stats);
     console.log(`🧩 Components collected: ${components.length} for ${url}`);
 
     if (!components.length) {
       console.warn(`⚠️ No components found for ${url}`);
     }
-
 
     await screenshotComponents(url, page, components, componentDir, isStage);
   } finally {
@@ -302,7 +302,7 @@ async function waitForComponents(page, url) {
       if (!main) return false;
 
       const scope =
-        main.querySelector("#content .row") ||
+        main.querySelector("#content-shoehorned") ||
         main.querySelector("#content") ||
         main;
 
@@ -313,13 +313,21 @@ async function waitForComponents(page, url) {
     const debug = await page.evaluate(() => {
       const main = document.querySelector("main");
       const content = document.querySelector("#content");
-      const row = document.querySelector("#content .row");
-      const components = document.querySelectorAll("div.component");
+      const shoehorned = document.querySelector("#content-shoehorned");
+
+      const scope =
+        main?.querySelector("#content-shoehorned") ||
+        main?.querySelector("#content") ||
+        main;
+
+      const components = scope?.querySelectorAll("div.component") || [];
+      const rows = scope?.querySelectorAll(".row") || [];
 
       return {
         mainFound: !!main,
         contentFound: !!content,
-        rowFound: !!row,
+        shoehornedFound: !!shoehorned,
+        rowsFound: rows.length,
         componentsCount: components.length,
       };
     });
@@ -331,15 +339,23 @@ async function waitForComponents(page, url) {
     const debug = await page.evaluate(() => {
       const main = document.querySelector("main");
       const content = document.querySelector("#content");
-      const row = document.querySelector("#content .row");
-      const components = document.querySelectorAll("div.component");
+      const shoehorned = document.querySelector("#content-shoehorned");
+
+      const scope =
+        main?.querySelector("#content-shoehorned") ||
+        main?.querySelector("#content") ||
+        main;
+
+      const components = scope?.querySelectorAll("div.component") || [];
+      const rows = scope?.querySelectorAll(".row") || [];
 
       return {
         title: document.title,
         url: location.href,
         mainFound: !!main,
         contentFound: !!content,
-        rowFound: !!row,
+        shoehornedFound: !!shoehorned,
+        rowsFound: rows.length,
         componentsCount: components.length,
         bodyStart: document.body?.outerHTML?.slice(0, 500) || "",
       };
@@ -352,54 +368,63 @@ async function waitForComponents(page, url) {
 async function getComponentSelectors(page) {
   return await page.evaluate(() => {
     const selectors = [];
-
-    const isFixed = (el) => {
-      const style = window.getComputedStyle(el);
-      return style.position === "fixed";
+    const stats = {
+      total: 0,
+      hidden: 0,
+      fixed: 0,
+      invisible: 0,
+      empty: 0,
+      kept: 0,
     };
 
+    const isFixed = (el) => getComputedStyle(el).position === "fixed";
+
     const isVisible = (el) => {
-      const style = window.getComputedStyle(el);
+      const style = getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") return false;
+
       const rect = el.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     };
 
     const isEmptyComponent = (el) => {
       const content = el.querySelector(".component-content") || el;
-
-      const text = content.innerText.replace(/\s+/g, "").trim();
-      const hasMedia = content.querySelector(
+      const text = (content.innerText || "").replace(/\s+/g, "").trim();
+      const hasMedia = !!content.querySelector(
         "img, video, iframe, svg, canvas, picture"
       );
-
-      const rect = el.getBoundingClientRect();
-
-      if (rect.height < 30) return true;
-
       return text.length === 0 && !hasMedia;
     };
 
     const main = document.querySelector("main") || document.body;
-
     const scope =
-      main.querySelector("#content .row") ||
+      main.querySelector("#content-shoehorned") ||
       main.querySelector("#content") ||
       main;
 
-      const components = Array.from(scope.children).filter(
-        (el) => el.matches("div.component")
-      );
-
-    //const components = Array.from(scope.querySelectorAll("div.component"));
+    const components = Array.from(scope.querySelectorAll("div.component"));
+    stats.total = components.length;
 
     let index = 0;
     for (const el of components) {
-      const tag = el.tagName.toLowerCase();
-      if (tag === "script" || tag === "style") continue;
-      if (isFixed(el)) continue;
-      if (!isVisible(el)) continue;
-      if (isEmptyComponent(el)) continue;
+      const style = getComputedStyle(el);
+
+      if (style.display === "none" || style.visibility === "hidden") {
+        stats.hidden++;
+        continue;
+      }
+      if (isFixed(el)) {
+        stats.fixed++;
+        continue;
+      }
+      if (!isVisible(el)) {
+        stats.invisible++;
+        continue;
+      }
+      if (isEmptyComponent(el)) {
+        stats.empty++;
+        continue;
+      }
 
       const id = `component-${String(index).padStart(2, "0")}`;
       el.setAttribute("data-component-id", id);
@@ -409,10 +434,11 @@ async function getComponentSelectors(page) {
         selector: `[data-component-id="${id}"]`,
       });
 
+      stats.kept++;
       index++;
     }
 
-    return selectors;
+    return { selectors, stats };
   });
 }
 
