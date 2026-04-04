@@ -278,13 +278,25 @@ async function screenshotComponents(page, components, outputDir, isStage) {
 }
 
 function encodeURLToFolder(url) {
+  const illegalCharsRegex = /[<>:"/\\|?*\0]/g;
+
+  let pathname;
   try {
-    const p = new URL(url).pathname;
-    if (!p || p === "/") return "index";
-    return p.replace(/\//g, "_");
+    pathname = new URL(url).pathname;
   } catch {
+    pathname = url;
+  }
+
+  if (!pathname || pathname === "/") {
     return "index";
   }
+
+  return pathname
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\//g, "_")
+    .replace(illegalCharsRegex, (char) =>
+      `%${char.charCodeAt(0).toString(16)}`
+    );
 }
 
 async function cropImageHeightIfNeeded(imgPath, maxHeight = 9000) {
