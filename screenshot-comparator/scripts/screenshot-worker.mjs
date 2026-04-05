@@ -12,7 +12,9 @@ import dotenv from "dotenv";
 import sharp from "sharp";
 dotenv.config();
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({
+  //headless: false,
+});
 
 const PLAYWRIGHT_TIMEOUT = process.env.PLAYWRIGHT_TIMEOUT
   ? parseInt(process.env.PLAYWRIGHT_TIMEOUT)
@@ -114,7 +116,6 @@ async function screenshotPageComponents(
 
   await page.waitForTimeout(5000);
 
-  // ✅ УДАЛЯЕМ БАННЕР ВЕЗДЕ (prod + stage)
   await page.evaluate(() => {
     const el = document.querySelector("#full-width-shoehorn");
     if (el) {
@@ -176,9 +177,75 @@ async function getComponentSelectors(page, isStage) {
       hidden: 0,
       fixed: 0,
       invisible: 0,
+      nested: 0,
       empty: 0,
       kept: 0,
     };
+
+    function cleanText(text) {
+      return (text || "")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "") // remove zero-width chars
+        .replace(/\u00A0/g, " ") // replace nbsp
+        .trim();
+    }
+
+    function isHidden(el) {
+      if (!(el instanceof Element)) return false;
+      const style = getComputedStyle(el);
+      return (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.opacity === "0"
+      );
+    }
+
+    function hasMeaningfulNode(root) {
+      if (!root) return false;
+
+      const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT
+      );
+
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = cleanText(node.nodeValue);
+          if (text) {
+            const parent = node.parentElement;
+            if (parent && !isHidden(parent)) return true;
+          }
+          continue;
+        }
+
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node;
+          const tag = el.tagName.toLowerCase();
+
+          if (isHidden(el)) continue;
+
+          // Real media/content
+          if (
+            tag === "img" ||
+            tag === "video" ||
+            tag === "iframe" ||
+            tag === "canvas" ||
+            tag === "picture" ||
+            tag === "object" ||
+            tag === "embed"
+          ) {
+            return true;
+          }
+
+          // Form controls count as meaningful
+          if (tag === "input" || tag === "textarea" || tag === "select") {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }
 
     const main = document.querySelector("main") || document.body;
 
@@ -192,11 +259,20 @@ async function getComponentSelectors(page, isStage) {
         main.querySelector("#content") ||
         main;
 
-    const components = isStage
-      ? Array.from(scope.children).filter((el) =>
-          el.matches("div.component")
-        )
+    // Collect all candidate components first
+    const rawComponents = isStage
+      ? Array.from(scope.children).filter((el) => el.matches("div.component"))
       : Array.from(scope.querySelectorAll("div.component"));
+
+    // Keep only top-level components inside the current scope
+    const components = rawComponents.filter((el) => {
+      const parentComponent = el.parentElement?.closest?.("div.component");
+      if (parentComponent) {
+        stats.nested++;
+        return false;
+      }
+      return true;
+    });
 
     stats.total = components.length;
 
@@ -206,29 +282,34 @@ async function getComponentSelectors(page, isStage) {
     for (const el of components) {
       const style = getComputedStyle(el);
 
+      // Skip hidden components
       if (style.display === "none" || style.visibility === "hidden") {
         stats.hidden++;
         continue;
       }
 
+      // Skip fixed components
       if (style.position === "fixed") {
         stats.fixed++;
         continue;
       }
 
+      // Skip zero-sized components
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
         stats.invisible++;
         continue;
       }
 
-      const content = el.querySelector(".component-content") || el;
-      const text = (content.innerText || "").trim();
-      const hasMedia = !!content.querySelector(
-        "img, video, iframe, svg, canvas, picture"
+      // If there is a direct .component-content child, validate only it.
+      // Otherwise validate the whole component.
+      const directContent = Array.from(el.children).find(
+        (child) => child.classList?.contains("component-content")
       );
 
-      if (!text && !hasMedia) {
+      const rootToCheck = directContent || el;
+
+      if (!hasMeaningfulNode(rootToCheck)) {
         stats.empty++;
         continue;
       }
