@@ -67,8 +67,10 @@ try {
   };
 
   updatedPaths.forEach((slug) => {
-    ///articles/:articles
-    if (slug.includes(":")) {
+    ///articles/:articles    
+    const temp = slug.replace("/:locale", "");
+    console.log(`Processing slug: ${temp}`);
+    if (temp.includes(":")) {
       const spl = slug.split(":");
       const entryType = spl[spl.length - 1].replace(/\/$/, "");
       const typeFromMapping = typeMapping[entryType];
