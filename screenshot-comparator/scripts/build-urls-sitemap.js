@@ -1,6 +1,10 @@
 import fs from "fs";
 import { env } from "./utils.js";
 import dotenv from "dotenv";
+import {
+  parseDynamicSamplePatterns,
+  applyDynamicUrlSampling,
+} from "./sitemap-dynamic-samples.js";
 dotenv.config();
 
 async function getSitemapUrls(url) {
@@ -31,9 +35,36 @@ async function getSitemapUrls(url) {
     paths.unshift("/");
   }
 
-  const result = Array.from(paths);
-  console.log(`Urls count: ${result.length}`);
+  let result = [...new Set(paths.map((p) => (p.startsWith("/") ? p : `/${p}`)))];
   result.sort();
+
+  const patternRaw = process.env.SITEMAP_DYNAMIC_SAMPLE_PATTERNS?.trim();
+  const patterns = parseDynamicSamplePatterns(patternRaw);
+  const sampleCount = process.env.SITEMAP_DYNAMIC_SAMPLE_COUNT
+    ? parseInt(process.env.SITEMAP_DYNAMIC_SAMPLE_COUNT, 10)
+    : 2;
+
+  if (patterns.length > 0) {
+    const before = result.length;
+    const { paths: sampled, stats } = applyDynamicUrlSampling(
+      result,
+      patterns,
+      Number.isFinite(sampleCount) ? sampleCount : 2,
+    );
+    result = sampled;
+    console.log(
+      `Dynamic sampling (${patterns.length} pattern(s), up to ${Number.isFinite(sampleCount) ? sampleCount : 2} URL(s) each): ${before} → ${result.length} paths`,
+    );
+    for (const s of stats) {
+      if (s.kept > 0 || s.skipped > 0) {
+        console.log(
+          `  • ${s.pattern}: kept ${s.kept}, skipped ${s.skipped} (same composition)`,
+        );
+      }
+    }
+  }
+
+  console.log(`Urls count: ${result.length}`);
   try {
     fs.mkdirSync(".temp", { recursive: true });
   } catch {}
@@ -45,5 +76,5 @@ async function getSitemapUrls(url) {
     }
   );
 
-  console.log("✅ build-urls complete! Check urls.json");
+  console.log("✅ build-urls-sitemap complete! Output: .temp/urls-sitemap.json");
 })();
