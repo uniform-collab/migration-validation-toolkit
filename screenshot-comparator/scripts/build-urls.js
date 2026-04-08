@@ -80,13 +80,13 @@ try {
       );
       entriesByType.forEach((entry) => {
         const url = new URL(
-          slug.replace(":" + entryType, entry.slug),
+          temp.replace(":" + entryType, entry.slug),
           process.env.PROD_WEBSITE_URL
         ).href;
         urls.add(url);
       });
     } else {
-      const url = new URL(slug, process.env.PROD_WEBSITE_URL).href;
+      const url = new URL(temp, process.env.PROD_WEBSITE_URL).href;
       urls.add(url);
     }
   });
