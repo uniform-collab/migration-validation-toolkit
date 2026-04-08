@@ -14,7 +14,9 @@ try {
     try {
       entries = JSON.parse(fs.readFileSync("data/entries.json", "utf-8"));
     } catch (e) {
-      console.warn("⚠️ entries.json exists but is invalid JSON, using empty array");
+      console.warn(
+        "⚠️ entries.json exists but is invalid JSON, using empty array",
+      );
       entries = [];
     }
   } else {
@@ -52,7 +54,7 @@ try {
 
   const updatedPaths = paths?.filter(
     (path) =>
-      !redirects.some((redirect) => redirect.redirect.sourceUrl === path)
+      !redirects.some((redirect) => redirect.redirect.sourceUrl === path),
   );
   console.log(`Filtered paths: ${updatedPaths.length} valid paths.`);
 
@@ -67,7 +69,7 @@ try {
   };
 
   updatedPaths.forEach((slug) => {
-    ///articles/:articles    
+    ///articles/:articles
     const temp = slug.replace("/:locale", "");
     console.log(`Processing slug: ${temp}`);
     if (temp.includes(":")) {
@@ -76,17 +78,17 @@ try {
       const typeFromMapping = typeMapping[entryType];
       const entriesByType = entries.filter((e) => e.type === typeFromMapping);
       console.log(
-        `Found entries ${entriesByType.length} for type: ${entryType}`
+        `Found entries ${entriesByType.length} for type: ${entryType}`,
       );
       entriesByType.forEach((entry) => {
         const url = new URL(
           slug.replace(":" + entryType, entry.slug),
-          process.env.PROD_WEBSITE_URL
+          process.env.PROD_WEBSITE_URL,
         ).href;
         urls.add(url);
       });
     } else {
-      const url = new URL(slug, process.env.PROD_WEBSITE_URL).href;
+      const url = new URL(temp, process.env.PROD_WEBSITE_URL).href;
       urls.add(url);
     }
   });
