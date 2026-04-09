@@ -10,6 +10,7 @@ import {
   isAllowedMediaUrl,
 } from "./utils.js";
 import { loadSelectorMap } from "./selector-map.js";
+import { getScreenshotFileExtension } from "./screenshot-image-format.js";
 import dotenv from "dotenv";
 import sharp from "sharp";
 dotenv.config();
@@ -507,9 +508,10 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
         { selector: comp.selector, compName: comp.name }
       );
 
+      const shotExt = getScreenshotFileExtension();
       const filePath = path.join(
         outputDir,
-        `${comp.name}${isStage ? "_migrated" : "_prod"}.png`
+        `${comp.name}${isStage ? "_migrated" : "_prod"}.${shotExt}`,
       );
 
       // Scroll component into view to trigger lazy loading
@@ -548,7 +550,12 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
         continue;
       }
 
-      await element.screenshot({ path: filePath });
+      if (shotExt === "bmp") {
+        const pngBuf = await element.screenshot();
+        await sharp(pngBuf).toFile(filePath);
+      } else {
+        await element.screenshot({ path: filePath });
+      }
 
       // Crop height if necessary
       await cropImageHeightIfNeeded(filePath, 9000);
@@ -719,11 +726,16 @@ async function cropImageHeightIfNeeded(imgPath, maxHeight = 9000) {
     const metadata = await image.metadata();
     if (metadata.height > maxHeight) {
       console.log(
-        `✂️ Trimming image ${imgPath} from ${metadata.height}px to ${maxHeight}px`
+        `✂️ Trimming image ${imgPath} from ${metadata.height}px to ${maxHeight}px`,
       );
       await image
-        .extract({ top: 0, left: 0, width: metadata.width, height: maxHeight })
-        .toFile(imgPath); // overwrite
+        .extract({
+          top: 0,
+          left: 0,
+          width: metadata.width,
+          height: maxHeight,
+        })
+        .toFile(imgPath);
     }
   } catch (e) {
     console.warn(`⚠️ Could not crop ${imgPath}: ${e.message}`);

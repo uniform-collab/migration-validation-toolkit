@@ -2,8 +2,11 @@ import { fork } from "child_process";
 import fs from "fs";
 import path from "path";
 import { env } from "./utils.js";
+import { getScreenshotFileExtension } from "./screenshot-image-format.js";
 import dotenv from "dotenv";
 dotenv.config();
+
+const shotExt = getScreenshotFileExtension();
 
 const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
 
@@ -30,11 +33,11 @@ const rawQueue = urls
 
     const prodImgPath = path.join(
       screenshotsProdDir,
-      `prod_${getFileName(prodUrl)}.png`
+      `prod_${getFileName(prodUrl)}.${shotExt}`,
     );
     const migratedImgPath = path.join(
       screenshotsMigratedDir,
-      `migrated_${getFileName(migratedUrl)}.png`
+      `migrated_${getFileName(migratedUrl)}.${shotExt}`,
     );
 
     return {
