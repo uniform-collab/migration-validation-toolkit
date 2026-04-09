@@ -42,6 +42,13 @@ export function parseDynamicSamplePatterns(raw) {
     .filter((p) => p !== "/" && p.length > 0);
 }
 
+/** True if pathname matches any pattern (same rules as build-urls-sitemap sampling). */
+export function pathMatchesAnyDynamicPattern(pathname, patterns) {
+  if (!patterns.length) return false;
+  const n = normalizePath(pathname);
+  return patterns.some((pat) => pathMatchesDynamicPattern(n, pat));
+}
+
 /**
  * @param {string[]} paths - pathnames (with leading /)
  * @param {string[]} patterns - from parseDynamicSamplePatterns
