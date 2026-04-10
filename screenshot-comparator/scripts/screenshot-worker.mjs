@@ -277,6 +277,7 @@ async function screenshotPageComponents(
     });
 
     await freezeAnimations(page);
+    await removeConfiguredOverlayElements(page);
 
     const client = await page.context().newCDPSession(page);
     //await client.send('Emulation.setScriptExecutionDisabled', { value: true });
@@ -290,6 +291,7 @@ async function screenshotPageComponents(
       console.warn(`⚠️ No sections found for ${url}`);
     }
 
+    await removeConfiguredOverlayElements(page);
 
     await screenshotComponents(url, page, components, componentDir, isStage);
   } finally {
@@ -579,6 +581,30 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
         err.message
       );
     }
+  }
+}
+
+/** Removes nodes matching selector map `removeBeforeScreenshot` (cookie banners, etc.). */
+async function removeConfiguredOverlayElements(page) {
+  const selectors = selectorMap.removeBeforeScreenshot;
+  if (!Array.isArray(selectors) || selectors.length === 0) return;
+
+  const removed = await page.evaluate((sels) => {
+    let count = 0;
+    for (const raw of sels) {
+      const sel = raw.trim();
+      document.querySelectorAll(sel).forEach((el) => {
+        el.remove();
+        count++;
+      });
+    }
+    return count;
+  }, selectors);
+
+  if (removed > 0) {
+    console.log(
+      `🔥 Removed ${removed} element(s) (removeBeforeScreenshot in selector map)`
+    );
   }
 }
 

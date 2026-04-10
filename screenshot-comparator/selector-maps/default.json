@@ -2,5 +2,6 @@
   "scopeSelectors": ["main #content", "main"],
   "items": {
     "strategy": "directChildren"
-  }
+  },
+  "removeBeforeScreenshot": ["#onetrust-consent-sdk"]
 }

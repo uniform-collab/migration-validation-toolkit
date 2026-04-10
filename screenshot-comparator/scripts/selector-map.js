@@ -13,6 +13,7 @@ const DEFAULT_RELATIVE = "selector-maps/default.json";
  * @typedef {object} SelectorMap
  * @property {string[]} scopeSelectors - CSS selectors tried in order (document.querySelector); first match is the capture root
  * @property {SelectorMapItems} items
+ * @property {string[]} [removeBeforeScreenshot] - CSS selectors; matching nodes are removed from the DOM before screenshots (e.g. cookie banners). Tried twice per page to catch late-injected UI.
  */
 
 /**
@@ -81,6 +82,22 @@ function validateSelectorMap(data, filePath) {
       throw new Error(
         `items.selector is required when strategy is querySelectorAll (${filePath})`
       );
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(data, "removeBeforeScreenshot")) {
+    const r = data.removeBeforeScreenshot;
+    if (!Array.isArray(r)) {
+      throw new Error(
+        `removeBeforeScreenshot must be an array of CSS selector strings (${filePath})`
+      );
+    }
+    for (const s of r) {
+      if (typeof s !== "string" || !s.trim()) {
+        throw new Error(
+          `removeBeforeScreenshot entries must be non-empty strings (${filePath})`
+        );
+      }
     }
   }
 }
