@@ -3,17 +3,8 @@ import path from "path";
 import resemble from "resemblejs";
 import sharp from "sharp";
 import { env } from "./utils.js";
-import { getScreenshotFileExtension } from "./screenshot-image-format.js";
 import dotenv from "dotenv";
 dotenv.config();
-
-const shotExt = getScreenshotFileExtension();
-const prodFileSuffix = `_prod.${shotExt}`;
-const migratedFileSuffix = `_migrated.${shotExt}`;
-const prodSuffixRe = new RegExp(`_prod\\.${shotExt.replace(".", "\\.")}$`);
-const migratedSuffixRe = new RegExp(
-  `_migrated\\.${shotExt.replace(".", "\\.")}$`,
-);
 
 process.on("SIGTERM", () => {
   console.log("Worker received termination signal. Cleaning up...");
@@ -28,31 +19,27 @@ async function doWork(obj) {
   const { outputDir, prodUrl, migratedUrl, relativeUrl, ignoreList } = obj;
 
   const folderName = getFileName(prodUrl);
-  console.log(
-    `\n=== Processing URL: ${relativeUrl} | Folder: ${folderName} ===`,
-  );
+  console.log(`\n=== Processing URL: ${relativeUrl} | Folder: ${folderName} ===`);
 
   const prodFolder = path.join(outputDir, "prod", folderName);
   const migratedFolder = path.join(
     outputDir,
     "migrated",
-    getFileName(migratedUrl),
+    getFileName(migratedUrl)
   );
   const diffFolder = path.join(outputDir, "diffs", folderName);
 
   const prodFiles = fs.existsSync(prodFolder)
-    ? fs.readdirSync(prodFolder).filter((f) => f.endsWith(prodFileSuffix))
+    ? fs.readdirSync(prodFolder).filter((f) => f.endsWith("_prod.png"))
     : [];
 
   const migratedFiles = fs.existsSync(migratedFolder)
-    ? fs
-        .readdirSync(migratedFolder)
-        .filter((f) => f.endsWith(migratedFileSuffix))
+    ? fs.readdirSync(migratedFolder).filter((f) => f.endsWith("_migrated.png"))
     : [];
 
-  const prodComponentNames = prodFiles.map((f) => f.replace(prodSuffixRe, ""));
+  const prodComponentNames = prodFiles.map((f) => f.replace(/_prod\.png$/, ""));
   const migratedComponentNames = migratedFiles.map((f) =>
-    f.replace(migratedSuffixRe, ""),
+    f.replace(/_migrated\.png$/, "")
   );
 
   const allComponentNames = new Set([
@@ -78,7 +65,7 @@ async function doWork(obj) {
 
     if (stripDomain(prodFinalUrl) !== stripDomain(migratedFinalUrl)) {
       console.warn(
-        `🚨 Redirect mismatch: PROD → ${prodFinalUrl}, MIGRATED → ${migratedFinalUrl}`,
+        `🚨 Redirect mismatch: PROD → ${prodFinalUrl}, MIGRATED → ${migratedFinalUrl}`
       );
 
       return {
@@ -90,27 +77,20 @@ async function doWork(obj) {
       };
     }
 
-    console.log(
-      `🔍 Comparing ${allComponentNames.size} components for URL: ${relativeUrl}`,
-    );
+    console.log(`🔍 Comparing ${allComponentNames.size} components for URL: ${relativeUrl}`);
     for (const componentName of allComponentNames) {
-      const prodImgPath = path.join(
-        prodFolder,
-        `${componentName}${prodFileSuffix}`,
-      );
+      const prodImgPath = path.join(prodFolder, `${componentName}_prod.png`);
       console.log("📷 PROD image path:", prodImgPath);
       const stageImgPath = path.join(
         migratedFolder,
-        `${componentName}${migratedFileSuffix}`,
+        `${componentName}_migrated.png`
       );
       const diffImgPath = path.join(diffFolder, `${componentName}_diff.png`);
 
       const prodExists = fs.existsSync(prodImgPath);
       const stageExists = fs.existsSync(stageImgPath);
 
-      console.log(
-        `🔎 Comparing component: ${componentName} | PROD exists: ${prodExists} | MIGRATED exists: ${stageExists}`,
-      );
+      console.log(`🔎 Comparing component: ${componentName} | PROD exists: ${prodExists} | MIGRATED exists: ${stageExists}`);
       if (!prodExists && stageExists) {
         const height = await getImageHeight(stageImgPath);
         if (height > 0) {
@@ -149,18 +129,18 @@ async function doWork(obj) {
 
       const { match, mismatch, diffBuffer, error } = await compareImages(
         prodImgPath,
-        stageImgPath,
+        stageImgPath
       );
 
       const ignored = shouldIgnoreDiff(
         relativeUrl,
         componentName,
         mismatch,
-        ignoreList,
+        ignoreList
       );
       if (ignored) {
         console.log(
-          `ℹ️ Ignored difference for ${relativeUrl} :: ${componentName} with ${mismatch}% mismatch as per ignore list`,
+          `ℹ️ Ignored difference for ${relativeUrl} :: ${componentName} with ${mismatch}% mismatch as per ignore list`
         );
         return {
           component: componentName,
@@ -236,8 +216,8 @@ async function getImageHeight(imgPath) {
 }
 
 async function compareImages(prodImgPath, stageImgPath) {
-  const prodBuffer = await sharp(prodImgPath).png().toBuffer();
-  const stageBuffer = await sharp(stageImgPath).png().toBuffer();
+  const prodBuffer = fs.readFileSync(prodImgPath);
+  const stageBuffer = fs.readFileSync(stageImgPath);
 
   return new Promise((resolve) => {
     resemble(prodBuffer)
@@ -289,14 +269,16 @@ function getFileName(input) {
     pathname = input;
   }
 
-  pathname = pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+  pathname = pathname
+    .replace(/^\/+/, "")  
+    .replace(/\/+$/, ""); 
 
   if (!pathname) return "index";
 
   return pathname
-    .split("/")
+    .split("/")            
     .filter(Boolean)
-    .join("_")
+    .join("_")             
     .replace(/[<>:"\\|?*\0]/g, "");
 }
 
@@ -314,11 +296,7 @@ function shouldIgnoreDiff(url, component, mismatch, ignoreList) {
   for (const rule of ignoreList) {
     if (!rule) continue;
 
-    if (
-      rule.url === url &&
-      rule.component === component &&
-      mismatch == rule.percents
-    ) {
+    if (rule.url === url && rule.component === component && mismatch == rule.percents) {
       return true;
     }
   }
