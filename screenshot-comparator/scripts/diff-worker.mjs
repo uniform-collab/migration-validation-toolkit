@@ -2,7 +2,10 @@ import fs from "fs";
 import path from "path";
 import resemble from "resemblejs";
 import sharp from "sharp";
-import { env } from "./utils.js";
+import {
+  isContentComparisonEnabled,
+  normalizeInnerTextForCompare,
+} from "./utils.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -17,6 +20,7 @@ process.on("message", async (obj) => {
 
 async function doWork(obj) {
   const { outputDir, prodUrl, migratedUrl, relativeUrl, ignoreList } = obj;
+  const contentComparison = isContentComparisonEnabled();
 
   const folderName = getFileName(prodUrl);
   console.log(`\n=== Processing URL: ${relativeUrl} | Folder: ${folderName} ===`);
@@ -108,6 +112,12 @@ async function doWork(obj) {
           tag: "extra-in-migrated",
           log: `⚠️ Extra component in migrated: ${componentName}`,
           height,
+          ...contentSidecarsIfEnabled(
+            contentComparison,
+            prodFolder,
+            migratedFolder,
+            componentName
+          ),
         });
 
         continue;
@@ -123,6 +133,12 @@ async function doWork(obj) {
           diffImg: null,
           log: `⚠️ Missing component in migrated: ${componentName}`,
           tag: "missing-in-migrated",
+          ...contentSidecarsIfEnabled(
+            contentComparison,
+            prodFolder,
+            migratedFolder,
+            componentName
+          ),
         });
         continue;
       }
@@ -142,14 +158,23 @@ async function doWork(obj) {
         console.log(
           `ℹ️ Ignored difference for ${relativeUrl} :: ${componentName} with ${mismatch}% mismatch as per ignore list`
         );
-        return {
+        results.push({
           component: componentName,
+          prodImg: path.relative(outputDir, prodImgPath),
+          stageImg: path.relative(outputDir, stageImgPath),
+          diffImg: null,
           match: true,
           mismatch: null,
-          diffImg: null,
           log: `Ignored difference for ${relativeUrl} :: ${componentName} with ${mismatch}% mismatch as per ignore list`,
           tag: "ignored-diff",
-        };
+          ...contentSidecarsIfEnabled(
+            contentComparison,
+            prodFolder,
+            migratedFolder,
+            componentName
+          ),
+        });
+        continue;
       }
 
       if (!isNaN(mismatch) && height > 0) {
@@ -175,6 +200,12 @@ async function doWork(obj) {
         mismatch,
         tag: getDiffTag(mismatch),
         log: error ?? null,
+        ...contentSidecarsIfEnabled(
+          contentComparison,
+          prodFolder,
+          migratedFolder,
+          componentName
+        ),
       });
     }
 
@@ -194,6 +225,75 @@ async function doWork(obj) {
     console.error(`❌ Error processing ${prodUrl}:`, error);
     return null;
   }
+}
+
+function contentSidecarsIfEnabled(
+  enabled,
+  prodFolder,
+  migratedFolder,
+  componentName
+) {
+  if (!enabled) return {};
+  return compareInnerTextSidecars(prodFolder, migratedFolder, componentName);
+}
+
+function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
+  const prodPath = path.join(
+    prodFolder,
+    `${componentName}_prod.innerText.txt`
+  );
+  const migPath = path.join(
+    migratedFolder,
+    `${componentName}_migrated.innerText.txt`
+  );
+  const prodHas = fs.existsSync(prodPath);
+  const migHas = fs.existsSync(migPath);
+
+  if (!prodHas && !migHas) {
+    return {
+      contentMatch: null,
+      contentTag: "content-not-captured",
+      contentLog:
+        "No .innerText.txt sidecars. Capture with ENABLE_CONTENT_COMPARISON=1 when running screenshots.",
+    };
+  }
+  if (!prodHas && migHas) {
+    return {
+      contentMatch: false,
+      contentTag: "content-extra-in-migrated",
+      contentLog: "innerText snapshot exists only on migrated.",
+    };
+  }
+  if (prodHas && !migHas) {
+    return {
+      contentMatch: false,
+      contentTag: "content-missing-in-migrated",
+      contentLog: "innerText snapshot missing on migrated.",
+    };
+  }
+
+  const prodRaw = fs.readFileSync(prodPath, "utf8");
+  const migRaw = fs.readFileSync(migPath, "utf8");
+  const prodN = normalizeInnerTextForCompare(prodRaw);
+  const migN = normalizeInnerTextForCompare(migRaw);
+  if (prodN === migN) {
+    return {
+      contentMatch: true,
+      contentTag: "content-match",
+      contentLog: null,
+    };
+  }
+
+  const preview = (s, n = 160) => {
+    const t = String(s).replace(/\s+/g, " ").trim();
+    return t.length <= n ? t : `${t.slice(0, n)}…`;
+  };
+
+  return {
+    contentMatch: false,
+    contentTag: "content-mismatch",
+    contentLog: `innerText differs (whitespace-normalized).\nPROD: ${preview(prodN)}\nMIGRATED: ${preview(migN)}`,
+  };
 }
 
 function stripDomain(url) {

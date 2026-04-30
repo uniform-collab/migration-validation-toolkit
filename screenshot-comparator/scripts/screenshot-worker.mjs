@@ -8,6 +8,7 @@ import {
   isVideo,
   extractCandidateUrl,
   isAllowedMediaUrl,
+  isContentComparisonEnabled,
 } from "./utils.js";
 import { loadSelectorMap } from "./selector-map.js";
 import dotenv from "dotenv";
@@ -15,6 +16,7 @@ import sharp from "sharp";
 dotenv.config();
 
 const selectorMap = loadSelectorMap();
+const captureInnerTextSnapshots = isContentComparisonEnabled();
 
 // Shared browser and context reused across tasks
 const browser = await chromium.launch({
@@ -292,7 +294,14 @@ async function screenshotPageComponents(
 
     await removeConfiguredOverlayElements(page);
 
-    await screenshotComponents(url, page, components, componentDir, isStage);
+    await screenshotComponents(
+      url,
+      page,
+      components,
+      componentDir,
+      isStage,
+      captureInnerTextSnapshots
+    );
   } finally {
     await page.close(); // always close the page
   }
@@ -461,7 +470,14 @@ async function getCaptureSelectors(page, map) {
   }, map);
 }
 
-async function screenshotComponents(url, page, components, outputDir, isStage) {
+async function screenshotComponents(
+  url,
+  page,
+  components,
+  outputDir,
+  isStage,
+  saveInnerText = false
+) {
   for (const comp of components) {
     try {
       const element = await page.$(comp.selector);
@@ -551,6 +567,18 @@ async function screenshotComponents(url, page, components, outputDir, isStage) {
       }
 
       await element.screenshot({ path: filePath });
+
+      if (saveInnerText) {
+        const textPath = path.join(
+          outputDir,
+          `${comp.name}${isStage ? "_migrated" : "_prod"}.innerText.txt`
+        );
+        const rawInnerText = await element.evaluate(
+          (el) => el.innerText ?? ""
+        );
+        fs.writeFileSync(textPath, rawInnerText, "utf8");
+        console.log(`📝 Component innerText saved: ${textPath}`);
+      }
 
       // Crop height if necessary
       await cropImageHeightIfNeeded(filePath, 9000);

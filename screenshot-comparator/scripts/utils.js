@@ -6,6 +6,21 @@ export function env(key) {
   return v;
 }
 
+/** When truthy (1, true, yes, on), capture and diff per-component innerText snapshots. */
+export function isContentComparisonEnabled() {
+  const v = String(process.env.ENABLE_CONTENT_COMPARISON || "")
+    .trim()
+    .toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Normalize innerText for comparison (whitespace-insensitive). */
+export function normalizeInnerTextForCompare(raw) {
+  return String(raw ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function isGif(u) {
   if (!u) return false;
   const clean = u.split(/[?#]/)[0].toLowerCase();

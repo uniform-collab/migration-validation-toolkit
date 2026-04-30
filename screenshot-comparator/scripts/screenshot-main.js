@@ -1,7 +1,7 @@
 import { fork } from "child_process";
 import fs from "fs";
 import path from "path";
-import { env } from "./utils.js";
+import { env, isContentComparisonEnabled } from "./utils.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -14,6 +14,12 @@ const useSitemap = process.argv.includes("--sitemap");
 const urlsFilePath = useSitemap? "./.temp/urls-sitemap.json" : "./.temp/urls.json";
 console.log(`Using URLs from: ${urlsFilePath}`);
 const urls = JSON.parse(fs.readFileSync(urlsFilePath, "utf8"));
+
+if (isContentComparisonEnabled()) {
+  console.log(
+    "📝 ENABLE_CONTENT_COMPARISON: innerText snapshots (.innerText.txt) will be saved next to each component PNG."
+  );
+}
 
 const outputDir = "./.comparison_results";
 const screenshotsProdDir = path.join(outputDir, "prod");

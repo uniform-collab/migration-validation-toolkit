@@ -1,6 +1,6 @@
 import { fork } from "child_process";
 import fs from "fs";
-import { env } from "./utils.js";
+import { env, isContentComparisonEnabled } from "./utils.js";
 import dotenv from "dotenv";
 import { create } from "xmlbuilder2";
 import path from "path";
@@ -20,6 +20,11 @@ if (!fs.existsSync(outputDir)) {
 
 const ignoreList = loadIgnoreList();
 console.log(`Loaded ${ignoreList.length} ignore diff rules.`);
+if (isContentComparisonEnabled()) {
+  console.log(
+    "📝 ENABLE_CONTENT_COMPARISON: innerText sidecars (.innerText.txt) will be compared in addition to PNGs."
+  );
+}
 const numWorkers = 4;
 const chunkSize = Math.ceil(urls.length / numWorkers);
 const results = [];
@@ -63,6 +68,7 @@ for (let i = 0; i < numWorkers; i++) {
 
           if (results.length === urls.length) {
             generateXmlReport(results);
+            generateContentXmlReport(results);
             writeMediaUrlsReport(results);
             console.log(
               "✅ Processing complete. Results saved to " + outputDir
@@ -150,11 +156,19 @@ function makeComponentTestCase(result, comp, outputDir) {
   if (comp.stageImg) attaches.push(path.relative(outputDir, path.join(outputDir, comp.stageImg)));
   if (comp.diffImg)  attaches.push(path.relative(outputDir, path.join(outputDir, comp.diffImg)));
 
-  const sysout = [
-    `• ${comp.component}: ${comp.mismatch != null ? comp.mismatch.toFixed(2) + '%' : 'N/A'} ${comp.tag ? '[' + comp.tag + ']' : ''}`,
-    '',
-    ...attaches.map(p => `[[ATTACHMENT|${p}]]`),
-  ].join('\n');
+  const contentLine =
+    comp.contentMatch === true || comp.contentMatch === false
+      ? `  innerText: ${comp.contentMatch ? "match" : "mismatch"}${comp.contentTag ? " [" + comp.contentTag + "]" : ""}${comp.contentLog ? "\n  " + comp.contentLog : ""}`
+      : comp.contentTag === "content-not-captured"
+        ? `  innerText: not captured [${comp.contentTag}]`
+        : null;
+
+  const sysoutParts = [
+    `• ${comp.component}: ${comp.mismatch != null ? comp.mismatch.toFixed(2) + "%" : "N/A"} ${comp.tag ? "[" + comp.tag + "]" : ""}`,
+  ];
+  if (contentLine) sysoutParts.push(contentLine);
+  sysoutParts.push("", ...attaches.map((p) => `[[ATTACHMENT|${p}]]`));
+  const sysout = sysoutParts.join("\n");
 
   const tc = {
     '@name': `${result.url} :: ${comp.component}`,
@@ -169,11 +183,21 @@ function makeComponentTestCase(result, comp, outputDir) {
     'system-out': { '#': `<![CDATA[\n${sysout}\n]]>` },
   };
 
-  const failing = comp.match === false || (typeof comp.mismatch === 'number' && comp.mismatch > 0);
+  const failing =
+    comp.match === false ||
+    (typeof comp.mismatch === "number" && comp.mismatch > 0) ||
+    comp.contentMatch === false;
   if (failing) {
+    const reasons = [];
+    if (comp.match === false || (typeof comp.mismatch === "number" && comp.mismatch > 0)) {
+      reasons.push(`Visual: ${mismatchStr}%`);
+    }
+    if (comp.contentMatch === false) {
+      reasons.push("innerText mismatch");
+    }
     tc.failure = {
-      '@message': `Visual mismatch in ${comp.component} for ${result.url}`,
-      '#': `Component mismatch: ${mismatchStr}%.`,
+      '@message': `Mismatch in ${comp.component} for ${result.url}`,
+      "#": reasons.join("; ") + (reasons.length ? "." : ""),
     };
   }
 
@@ -327,6 +351,89 @@ function generateXmlReport(results) {
     path.join(outputDir, 'results_footer.xml'),
     path.join(outputDir, 'results_redirects.xml'),
   );
+}
+
+function contentTagRank(tag) {
+  switch ((tag || "").toLowerCase()) {
+    case "content-mismatch":
+      return 3;
+    case "content-missing-in-migrated":
+    case "content-extra-in-migrated":
+      return 2;
+    case "content-not-captured":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function pickWorstContentTag(tags) {
+  let worst = null;
+  let worstRank = -1;
+  for (const t of tags) {
+    const r = contentTagRank(t);
+    if (r > worstRank) {
+      worst = t;
+      worstRank = r;
+    }
+  }
+  return worst ?? "unknown";
+}
+
+function generateContentXmlReport(results) {
+  if (!isContentComparisonEnabled()) return;
+
+  const outputDir = "./.comparison_results";
+  const cases = [];
+
+  for (const r of results) {
+    if (!r?.components?.length) continue;
+    const bodyComps = r.components.filter(
+      (c) => !isHeaderName(c.component) && !isFooterName(c.component)
+    );
+    const contentFails = bodyComps.filter((c) => c.contentMatch === false);
+    if (contentFails.length === 0) continue;
+
+    const lines = contentFails
+      .map(
+        (c) =>
+          `• ${c.component}: [${c.contentTag}]${c.contentLog ? "\n" + c.contentLog : ""}`
+      )
+      .join("\n\n");
+
+    const worstTag = pickWorstContentTag(contentFails.map((c) => c.contentTag));
+
+    cases.push({
+      "@name": `${r.url}`,
+      "@classname": worstTag,
+      properties: {
+        property: [
+          { "@name": "url", "@value": r.url },
+          {
+            "@name": "contentDiffComponents",
+            "@value": String(contentFails.length),
+          },
+        ],
+      },
+      failure: {
+        "@message": `innerText mismatch for ${r.url}`,
+        "#": lines,
+      },
+      "system-out": { "#": `<![CDATA[\n${lines}\n]]>` },
+    });
+  }
+
+  const suite = {
+    testsuite: {
+      "@name": "Content comparison (innerText)",
+      "@tests": cases.length,
+      "@failures": cases.length,
+      testcase: cases,
+    },
+  };
+
+  writeJUnit(path.join(outputDir, "results_content.xml"), suite);
+  console.log("📝 Wrote:", path.join(outputDir, "results_content.xml"));
 }
 
 function encodeURLToFilename(url) {
