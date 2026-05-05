@@ -3,6 +3,7 @@ import path from "path";
 import resemble from "resemblejs";
 import sharp from "sharp";
 import {
+  formatInnerTextForContentLog,
   isContentComparisonEnabled,
   normalizeInnerTextForCompare,
 } from "./utils.js";
@@ -258,17 +259,23 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
     };
   }
   if (!prodHas && migHas) {
+    const migN = normalizeInnerTextForCompare(
+      fs.readFileSync(migPath, "utf8")
+    );
     return {
       contentMatch: false,
       contentTag: "content-extra-in-migrated",
-      contentLog: "innerText snapshot exists only on migrated.",
+      contentLog: `innerText snapshot exists only on migrated.\nMIGRATED: ${formatInnerTextForContentLog(migN)}`,
     };
   }
   if (prodHas && !migHas) {
+    const prodN = normalizeInnerTextForCompare(
+      fs.readFileSync(prodPath, "utf8")
+    );
     return {
       contentMatch: false,
       contentTag: "content-missing-in-migrated",
-      contentLog: "innerText snapshot missing on migrated.",
+      contentLog: `innerText snapshot missing on migrated.\nPROD: ${formatInnerTextForContentLog(prodN)}`,
     };
   }
 
@@ -284,15 +291,10 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
     };
   }
 
-  const preview = (s, n = 160) => {
-    const t = String(s).replace(/\s+/g, " ").trim();
-    return t.length <= n ? t : `${t.slice(0, n)}…`;
-  };
-
   return {
     contentMatch: false,
     contentTag: "content-mismatch",
-    contentLog: `innerText differs (whitespace-normalized).\nPROD: ${preview(prodN)}\nMIGRATED: ${preview(migN)}`,
+    contentLog: `innerText differs (whitespace-normalized).\nPROD: ${formatInnerTextForContentLog(prodN)}\nMIGRATED: ${formatInnerTextForContentLog(migN)}`,
   };
 }
 

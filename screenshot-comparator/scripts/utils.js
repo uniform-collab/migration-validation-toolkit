@@ -14,6 +14,27 @@ export function isContentComparisonEnabled() {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+/**
+ * When truthy (1, true, yes, on), innerText lines in diff reports are truncated to a short preview.
+ * Default (unset): full normalized innerText in logs.
+ */
+export function isInnerTextLogPreviewEnabled() {
+  const v = String(process.env.INNER_TEXT_LOG_PREVIEW || "")
+    .trim()
+    .toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+const INNER_TEXT_LOG_PREVIEW_LEN = 160;
+
+/** Format normalized innerText for content diff logs (full or preview per INNER_TEXT_LOG_PREVIEW). */
+export function formatInnerTextForContentLog(normalizedText) {
+  const t = String(normalizedText ?? "");
+  if (!isInnerTextLogPreviewEnabled()) return t;
+  const n = INNER_TEXT_LOG_PREVIEW_LEN;
+  return t.length <= n ? t : `${t.slice(0, n)}…`;
+}
+
 /** Normalize innerText for comparison (whitespace-insensitive). */
 export function normalizeInnerTextForCompare(raw) {
   return String(raw ?? "")
