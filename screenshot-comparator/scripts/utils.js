@@ -14,25 +14,64 @@ export function isContentComparisonEnabled() {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
-/**
- * When truthy (1, true, yes, on), innerText lines in diff reports are truncated to a short preview.
- * Default (unset): full normalized innerText in logs.
- */
-export function isInnerTextLogPreviewEnabled() {
-  const v = String(process.env.INNER_TEXT_LOG_PREVIEW || "")
-    .trim()
-    .toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
+/** Target line length for innerText in content diff logs (default 80, min 20, max 500). */
+function getInnerTextLogWrapWidth() {
+  const raw = String(process.env.INNER_TEXT_LOG_WRAP_WIDTH || "").trim();
+  if (!raw) return 80;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 20 && n <= 500 ? n : 80;
 }
 
-const INNER_TEXT_LOG_PREVIEW_LEN = 160;
+/**
+ * Word-wrap normalized innerText to fixed width; very long tokens are hard-broken.
+ * Full text is always included (no truncation).
+ */
+export function wrapInnerTextForContentLog(normalizedText) {
+  const text = String(normalizedText ?? "");
+  const width = getInnerTextLogWrapWidth();
+  if (!text) return "";
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  const flush = () => {
+    if (line) {
+      lines.push(line);
+      line = "";
+    }
+  };
+  for (const w of words) {
+    if (w.length > width) {
+      flush();
+      let rest = w;
+      while (rest.length > width) {
+        lines.push(rest.slice(0, width));
+        rest = rest.slice(width);
+      }
+      line = rest;
+      continue;
+    }
+    const candidate = line ? `${line} ${w}` : w;
+    if (candidate.length <= width) {
+      line = candidate;
+    } else {
+      flush();
+      line = w;
+    }
+  }
+  flush();
+  return lines.join("\n");
+}
 
-/** Format normalized innerText for content diff logs (full or preview per INNER_TEXT_LOG_PREVIEW). */
-export function formatInnerTextForContentLog(normalizedText) {
-  const t = String(normalizedText ?? "");
-  if (!isInnerTextLogPreviewEnabled()) return t;
-  const n = INNER_TEXT_LOG_PREVIEW_LEN;
-  return t.length <= n ? t : `${t.slice(0, n)}…`;
+/**
+ * e.g. "PROD: " + wrapped body; continuation lines align under the label text.
+ */
+export function formatPrefixedWrappedBlock(prefix, normalizedText) {
+  const wrapped = wrapInnerTextForContentLog(normalizedText);
+  if (!wrapped) return prefix;
+  const parts = wrapped.split("\n");
+  const head = `${prefix}${parts[0]}`;
+  const pad = " ".repeat(prefix.length);
+  return [head, ...parts.slice(1).map((l) => `${pad}${l}`)].join("\n");
 }
 
 /** Normalize innerText for comparison (whitespace-insensitive). */
