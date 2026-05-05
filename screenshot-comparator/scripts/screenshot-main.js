@@ -63,20 +63,50 @@ const numWorkers = process.env.PLAYWRIGHT_WORKERS
 
 const workers = [];
 let results = [];
+/** @type {{ environment: string, requestedUrl: string, landingUrl: string, documentTitle: string }[]} */
+let authWallHits = [];
+
+function writeAuthWallReport(hits) {
+  if (hits.length === 0) return;
+  const outPath = path.join(outputDir, "auth-wall-urls.json");
+  fs.writeFileSync(outPath, JSON.stringify(hits, null, 2), "utf8");
+  console.log("");
+  console.log(
+    `🔐 Auth / login wall (${hits.length}): no sections captured — see ${outPath}`
+  );
+  for (const h of hits) {
+    console.log(`  • [${h.environment}] ${h.requestedUrl}`);
+    if (h.landingUrl && h.landingUrl !== h.requestedUrl) {
+      console.log(`    landed: ${h.landingUrl}`);
+    }
+  }
+  console.log("");
+}
 
 for (let i = 0; i < numWorkers; i++) {
   const worker = fork("./scripts/screenshot-worker.mjs");
   workers.push({ id: i, process: worker, busy: false });
 
   worker.on("message", (result) => {
-    results.push(result);
+    const ok =
+      result && typeof result === "object"
+        ? Boolean(result.ok)
+        : Boolean(result);
+    if (
+      result &&
+      typeof result === "object" &&
+      Array.isArray(result.authWall)
+    ) {
+      authWallHits.push(...result.authWall);
+    }
+    results.push(ok);
 
     const remaining = taskQueue.length;
     const done = results.length;
     const percent = ((done / totalTasks) * 100).toFixed(1);
 
     console.log(
-      result
+      ok
         ? `✅ Worker ${i} success (${remaining} left, ${percent}% done)`
         : `🆘 Worker ${i} failed (${remaining} left, ${percent}% done)`
     );
@@ -103,6 +133,7 @@ function assignNextTask(workerId) {
     const allDone = workers.every((w) => !w.busy);
     if (allDone) {
       console.log(`🏁 All tasks completed. Total: ${results.length}`);
+      writeAuthWallReport(authWallHits);
       workers.forEach((w) => w.process.kill("SIGTERM"));
     }
     return;

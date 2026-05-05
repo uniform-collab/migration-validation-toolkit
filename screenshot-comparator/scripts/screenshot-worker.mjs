@@ -41,7 +41,7 @@ process.on("message", async (obj) => {
     reducedMotion: "reduce",
   });
 
-  let result = false;
+  let result = { ok: false, authWall: [] };
   try {
     result = await Promise.race([
       doWork(obj, context),
@@ -54,10 +54,11 @@ process.on("message", async (obj) => {
     ]);
   } catch (err) {
     console.error(`🆘 Worker error:`, err);
+    result = { ok: false, authWall: [] };
   } finally {
     const duration = ((Date.now() - start) / 1000).toFixed(1);
     console.log(
-      result ? `✅ Task done (${duration}s)` : `🆘 Task failed (${duration}s)`
+      result?.ok ? `✅ Task done (${duration}s)` : `🆘 Task failed (${duration}s)`
     );
     await context.close();
     process.send(result);
@@ -66,27 +67,33 @@ process.on("message", async (obj) => {
 
 async function doWork(obj, context) {
   const { prodUrl, migratedUrl, prodOnly, migratedOnly } = obj;
+  const authWall = [];
 
   try {
     if (!migratedOnly) {
-      await screenshotPageComponents(
-        context,
-        prodUrl,
-        ".comparison_results/prod"
+      authWall.push(
+        ...(await screenshotPageComponents(
+          context,
+          prodUrl,
+          ".comparison_results/prod",
+          false
+        ))
       );
     }
     if (!prodOnly) {
-      await screenshotPageComponents(
-        context,
-        migratedUrl,
-        ".comparison_results/migrated",
-        true
+      authWall.push(
+        ...(await screenshotPageComponents(
+          context,
+          migratedUrl,
+          ".comparison_results/migrated",
+          true
+        ))
       );
     }
-    return true;
+    return { ok: true, authWall };
   } catch (error) {
     console.error(`🆘 Error processing ${prodUrl}:`, error);
-    return false;
+    return { ok: false, authWall };
   }
 }
 
@@ -99,7 +106,7 @@ async function screenshotPageComponents(
   const componentDir = path.join(baseDir, encodeURLToFolder(url));
   if (fs.existsSync(componentDir)) {
     console.log(`📂 Skipping existing directory: ${componentDir}`);
-    return;
+    return [];
   }
 
   const page = await context.newPage();
@@ -253,7 +260,7 @@ async function screenshotPageComponents(
 
     if (isPageNotFound) {
       console.warn(`🚫 Skipping "Page not found" page: ${url}`);
-      return;
+      return [];
     }
 
     // 🔥 https://cobham-satcom.com customization remove after
@@ -289,6 +296,19 @@ async function screenshotPageComponents(
     console.log(`🧩 Sections collected: ${components.length} for ${url}`);
 
     if (!components.length) {
+      const gate = await detectAuthRestrictedPage(page);
+      if (gate.matches) {
+        const row = {
+          environment: isStage ? "migrated" : "prod",
+          requestedUrl: url,
+          landingUrl: gate.landingUrl,
+          documentTitle: gate.title,
+        };
+        console.warn(
+          `🔐 Auth / login wall (no sections captured): ${url}\n   → ${gate.landingUrl}`
+        );
+        return [row];
+      }
       console.warn(`⚠️ No sections found for ${url}`);
     }
 
@@ -302,8 +322,51 @@ async function screenshotPageComponents(
       isStage,
       captureInnerTextSnapshots
     );
+
+    return [];
   } finally {
     await page.close(); // always close the page
+  }
+}
+
+/** Heuristic: redirected to IdP / login; no sections can be captured without credentials. */
+async function detectAuthRestrictedPage(page) {
+  try {
+    return await page.evaluate(() => {
+      const href = String(location.href || "");
+      const hrefLower = href.toLowerCase();
+      const host = String(location.hostname || "").toLowerCase();
+      const title = String(document.title || "");
+
+      const oktaDom = !!document.querySelector(
+        "#okta-login-container, .okta-sign-in-header, [data-se='okta-sign-in']"
+      );
+
+      const oauthPath =
+        hrefLower.includes("/oauth2/") ||
+        (hrefLower.includes("/authorize") && hrefLower.includes("client_id"));
+
+      const loginHost =
+        host.startsWith("login.") ||
+        /\.login\./i.test(host) ||
+        host.endsWith(".okta.com") ||
+        host.endsWith(".oktapreview.com");
+
+      const authTitle = /\b(sign\s*in|log\s*in)\b/i.test(title);
+
+      const matches =
+        oktaDom ||
+        (oauthPath && (loginHost || authTitle)) ||
+        (loginHost && authTitle);
+
+      return {
+        matches: Boolean(matches),
+        title,
+        landingUrl: href,
+      };
+    });
+  } catch {
+    return { matches: false, title: "", landingUrl: "" };
   }
 }
 
