@@ -14,6 +14,19 @@ export function isContentComparisonEnabled() {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+/**
+ * Append migrated-site visual testing access query params for screenshot workers.
+ * Uses VERCEL_PREVIEW_SECRET; leaves URL unchanged when secret is unset.
+ */
+export function withMigratedScreenshotAccess(urlString) {
+  const secret = String(process.env.VERCEL_PREVIEW_SECRET || "").trim();
+  if (!secret) return urlString;
+  const u = new URL(urlString);
+  u.searchParams.set("is_visual_testing", "true");
+  u.searchParams.set("secret", secret);
+  return u.toString();
+}
+
 /** Target line length for innerText in content diff logs (default 80, min 20, max 500). */
 function getInnerTextLogWrapWidth() {
   const raw = String(process.env.INNER_TEXT_LOG_WRAP_WIDTH || "").trim();

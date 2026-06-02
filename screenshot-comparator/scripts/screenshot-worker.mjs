@@ -9,6 +9,7 @@ import {
   extractCandidateUrl,
   isAllowedMediaUrl,
   isContentComparisonEnabled,
+  withMigratedScreenshotAccess,
 } from "./utils.js";
 import { loadSelectorMap } from "./selector-map.js";
 import dotenv from "dotenv";
@@ -152,8 +153,15 @@ async function screenshotPageComponents(
       });
     }
 
-    console.log(`🌐 Navigating to URL: ${url}`);
-    const parsedUrl = new URL(url);
+    const navigationUrl = isStage ? withMigratedScreenshotAccess(url) : url;
+    if (isStage && !process.env.VERCEL_PREVIEW_SECRET?.trim()) {
+      console.warn(
+        "⚠️ VERCEL_PREVIEW_SECRET is not set; migrated site may be inaccessible."
+      );
+    }
+
+    console.log(`🌐 Navigating to URL: ${navigationUrl}`);
+    const parsedUrl = new URL(navigationUrl);
     const searchTerm = parsedUrl.searchParams.get("searchTerm");
 
     try {
@@ -185,7 +193,7 @@ async function screenshotPageComponents(
       } else {
         await retryWithBackoff(
           () =>
-            page.goto(url, {
+            page.goto(navigationUrl, {
               waitUntil: "networkidle",
               timeout: PLAYWRIGHT_TIMEOUT,
             }),
@@ -200,7 +208,7 @@ async function screenshotPageComponents(
       if (err.name === "TimeoutError") {
         // if timeout, do screenshot with what is loaded - maybe a video on the page
         console.warn(
-          `⏰ Timeout navigating to ${url}, proceeding with screenshot`
+          `⏰ Timeout navigating to ${navigationUrl}, proceeding with screenshot`
         );
       } else {
         console.error(`🆘 Error navigating to ${url}:`, err);
@@ -208,7 +216,7 @@ async function screenshotPageComponents(
     }
 
     const finalUrl = page.url();
-    const redirected = finalUrl !== url;
+    const redirected = finalUrl !== navigationUrl;
 
     const componentDir = path.join(baseDir, encodeURLToFolder(url));
     fs.mkdirSync(componentDir, { recursive: true });
