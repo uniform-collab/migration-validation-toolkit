@@ -75,28 +75,101 @@ export function wrapInnerTextForContentLog(normalizedText) {
   return lines.join("\n");
 }
 
+/** Words of context around the differing span in content mismatch logs (default 8). */
+function getInnerTextDiffContextWords() {
+  const raw = String(process.env.INNER_TEXT_DIFF_CONTEXT_WORDS || "").trim();
+  if (!raw) return 8;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 && n <= 50 ? n : 8;
+}
+
+function expandRangeWithWordContext(str, coreStart, coreEnd, wordsBefore, wordsAfter) {
+  let s = coreStart;
+  for (let w = 0; w < wordsBefore && s > 0; w++) {
+    while (s > 0 && /\s/.test(str[s - 1])) s--;
+    if (s === 0) break;
+    while (s > 0 && /\S/.test(str[s - 1])) s--;
+  }
+
+  let e = coreEnd;
+  for (let w = 0; w < wordsAfter && e < str.length; w++) {
+    while (e < str.length && /\s/.test(str[e])) e++;
+    if (e >= str.length) break;
+    while (e < str.length && /\S/.test(str[e])) e++;
+  }
+
+  return { start: s, end: e };
+}
+
+function buildInnerTextDiffExcerpt(normalizedText, coreStart, coreEnd) {
+  const str = String(normalizedText ?? "");
+  if (!str) return "";
+  const words = getInnerTextDiffContextWords();
+  const { start, end } = expandRangeWithWordContext(
+    str,
+    coreStart,
+    coreEnd,
+    words,
+    words
+  );
+  let out = str.slice(start, end);
+  if (start > 0) out = `(...) ${out}`;
+  if (end < str.length) out = `${out} (...)`;
+  return out;
+}
+
+/**
+ * Excerpts around the first/last differing span (shared prefix/suffix stripped).
+ */
+export function extractInnerTextDiffExcerpts(prodNormalized, migratedNormalized) {
+  const a = String(prodNormalized ?? "");
+  const b = String(migratedNormalized ?? "");
+
+  let prefixLen = 0;
+  const minLen = Math.min(a.length, b.length);
+  while (prefixLen < minLen && a[prefixLen] === b[prefixLen]) prefixLen++;
+
+  let suffixLen = 0;
+  const maxSuffix = Math.min(a.length - prefixLen, b.length - prefixLen);
+  while (
+    suffixLen < maxSuffix &&
+    a[a.length - 1 - suffixLen] === b[b.length - 1 - suffixLen]
+  ) {
+    suffixLen++;
+  }
+
+  return {
+    prod: buildInnerTextDiffExcerpt(a, prefixLen, a.length - suffixLen),
+    mig: buildInnerTextDiffExcerpt(b, prefixLen, b.length - suffixLen),
+  };
+}
+
 /** Separator between PROD / MIGRATED blocks; width matches INNER_TEXT_LOG_WRAP_WIDTH. */
 export function getContentLogSectionSeparator() {
   return "=".repeat(getInnerTextLogWrapWidth());
 }
 
 /**
- * One environment block: separator, label, blank line, then word-wrapped full text.
+ * One environment block: separator, label, blank line, then word-wrapped text.
  * @param {"PROD"|"MIGRATED"} label
  */
-export function formatContentLogEnvironmentBlock(label, normalizedText) {
-  const wrapped = wrapInnerTextForContentLog(normalizedText);
+export function formatContentLogEnvironmentBlock(label, text) {
+  const wrapped = wrapInnerTextForContentLog(text);
   const body = wrapped ? `\n\n${wrapped}` : "";
   return `${getContentLogSectionSeparator()}\n${label}: ${body}`;
 }
 
-/** PROD vs MIGRATED innerText mismatch message for reports. */
+/** PROD vs MIGRATED innerText mismatch message for reports (diff-focused excerpts). */
 export function formatContentMismatchLog(prodNormalized, migratedNormalized) {
+  const { prod, mig } = extractInnerTextDiffExcerpts(
+    prodNormalized,
+    migratedNormalized
+  );
   return [
     "innerText differs (whitespace-normalized).",
     "",
-    formatContentLogEnvironmentBlock("PROD", prodNormalized),
-    formatContentLogEnvironmentBlock("MIGRATED", migratedNormalized),
+    formatContentLogEnvironmentBlock("PROD", prod),
+    formatContentLogEnvironmentBlock("MIGRATED", mig),
   ].join("\n");
 }
 
