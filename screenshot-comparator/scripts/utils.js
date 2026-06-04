@@ -75,16 +75,29 @@ export function wrapInnerTextForContentLog(normalizedText) {
   return lines.join("\n");
 }
 
+/** Separator between PROD / MIGRATED blocks; width matches INNER_TEXT_LOG_WRAP_WIDTH. */
+export function getContentLogSectionSeparator() {
+  return "=".repeat(getInnerTextLogWrapWidth());
+}
+
 /**
- * e.g. "PROD: " + wrapped body; continuation lines align under the label text.
+ * One environment block: separator, label, blank line, then word-wrapped full text.
+ * @param {"PROD"|"MIGRATED"} label
  */
-export function formatPrefixedWrappedBlock(prefix, normalizedText) {
+export function formatContentLogEnvironmentBlock(label, normalizedText) {
   const wrapped = wrapInnerTextForContentLog(normalizedText);
-  if (!wrapped) return prefix;
-  const parts = wrapped.split("\n");
-  const head = `${prefix}${parts[0]}`;
-  const pad = " ".repeat(prefix.length);
-  return [head, ...parts.slice(1).map((l) => `${pad}${l}`)].join("\n");
+  const body = wrapped ? `\n\n${wrapped}` : "";
+  return `${getContentLogSectionSeparator()}\n${label}: ${body}`;
+}
+
+/** PROD vs MIGRATED innerText mismatch message for reports. */
+export function formatContentMismatchLog(prodNormalized, migratedNormalized) {
+  return [
+    "innerText differs (whitespace-normalized).",
+    "",
+    formatContentLogEnvironmentBlock("PROD", prodNormalized),
+    formatContentLogEnvironmentBlock("MIGRATED", migratedNormalized),
+  ].join("\n");
 }
 
 /** Normalize innerText for comparison (whitespace-insensitive). */

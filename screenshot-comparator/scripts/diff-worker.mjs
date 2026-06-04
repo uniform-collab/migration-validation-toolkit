@@ -3,7 +3,8 @@ import path from "path";
 import resemble from "resemblejs";
 import sharp from "sharp";
 import {
-  formatPrefixedWrappedBlock,
+  formatContentLogEnvironmentBlock,
+  formatContentMismatchLog,
   isContentComparisonEnabled,
   normalizeInnerTextForCompare,
 } from "./utils.js";
@@ -265,7 +266,7 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
     return {
       contentMatch: false,
       contentTag: "content-extra-in-migrated",
-      contentLog: `innerText snapshot exists only on migrated.\n${formatPrefixedWrappedBlock("MIGRATED: ", migN)}`,
+      contentLog: `innerText snapshot exists only on migrated.\n\n${formatContentLogEnvironmentBlock("MIGRATED", migN)}`,
     };
   }
   if (prodHas && !migHas) {
@@ -275,7 +276,7 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
     return {
       contentMatch: false,
       contentTag: "content-missing-in-migrated",
-      contentLog: `innerText snapshot missing on migrated.\n${formatPrefixedWrappedBlock("PROD: ", prodN)}`,
+      contentLog: `innerText snapshot missing on migrated.\n\n${formatContentLogEnvironmentBlock("PROD", prodN)}`,
     };
   }
 
@@ -294,7 +295,7 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
   return {
     contentMatch: false,
     contentTag: "content-mismatch",
-    contentLog: `innerText differs (whitespace-normalized).\n${formatPrefixedWrappedBlock("PROD: ", prodN)}\n${formatPrefixedWrappedBlock("MIGRATED: ", migN)}`,
+    contentLog: formatContentMismatchLog(prodN, migN),
   };
 }
 
