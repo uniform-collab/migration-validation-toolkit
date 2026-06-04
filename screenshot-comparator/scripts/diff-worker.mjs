@@ -3,8 +3,7 @@ import path from "path";
 import resemble from "resemblejs";
 import sharp from "sharp";
 import {
-  formatContentLogEnvironmentBlock,
-  formatContentMismatchLog,
+  buildContentComparisonData,
   isContentComparisonEnabled,
   normalizeInnerTextForCompare,
 } from "./utils.js";
@@ -54,6 +53,7 @@ async function doWork(obj) {
   ]);
 
   const results = [];
+  const contentDiffJsonComponents = [];
   let totalWeightedMismatch = 0;
   let totalHeight = 0;
   let hasDiffImages = false;
@@ -118,7 +118,8 @@ async function doWork(obj) {
             contentComparison,
             prodFolder,
             migratedFolder,
-            componentName
+            componentName,
+            contentDiffJsonComponents
           ),
         });
 
@@ -139,7 +140,8 @@ async function doWork(obj) {
             contentComparison,
             prodFolder,
             migratedFolder,
-            componentName
+            componentName,
+            contentDiffJsonComponents
           ),
         });
         continue;
@@ -173,7 +175,8 @@ async function doWork(obj) {
             contentComparison,
             prodFolder,
             migratedFolder,
-            componentName
+            componentName,
+            contentDiffJsonComponents
           ),
         });
         continue;
@@ -206,13 +209,22 @@ async function doWork(obj) {
           contentComparison,
           prodFolder,
           migratedFolder,
-          componentName
+          componentName,
+          contentDiffJsonComponents
         ),
       });
     }
 
     const totalMismatchScore =
       totalHeight > 0 ? totalWeightedMismatch / totalHeight : null;
+
+    if (contentComparison) {
+      writePageContentDiffJson(
+        diffFolder,
+        { url: relativeUrl, prodUrl, migratedUrl },
+        contentDiffJsonComponents
+      );
+    }
 
     return {
       url: relativeUrl,
@@ -233,10 +245,26 @@ function contentSidecarsIfEnabled(
   enabled,
   prodFolder,
   migratedFolder,
-  componentName
+  componentName,
+  contentDiffJsonComponents
 ) {
   if (!enabled) return {};
-  return compareInnerTextSidecars(prodFolder, migratedFolder, componentName);
+  const comparison = compareInnerTextSidecars(
+    prodFolder,
+    migratedFolder,
+    componentName
+  );
+  if (comparison.jsonEntry) {
+    contentDiffJsonComponents.push({
+      component: componentName,
+      contentMatch: comparison.contentMatch,
+      contentTag: comparison.contentTag,
+      prod: comparison.jsonEntry.prod,
+      migrated: comparison.jsonEntry.migrated,
+    });
+  }
+  const { contentMatch, contentTag, contentLog } = comparison;
+  return { contentMatch, contentTag, contentLog };
 }
 
 function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
@@ -251,52 +279,30 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
   const prodHas = fs.existsSync(prodPath);
   const migHas = fs.existsSync(migPath);
 
-  if (!prodHas && !migHas) {
-    return {
-      contentMatch: null,
-      contentTag: "content-not-captured",
-      contentLog:
-        "No .innerText.txt sidecars. Capture with ENABLE_CONTENT_COMPARISON=1 when running screenshots.",
-    };
-  }
-  if (!prodHas && migHas) {
-    const migN = normalizeInnerTextForCompare(
-      fs.readFileSync(migPath, "utf8")
-    );
-    return {
-      contentMatch: false,
-      contentTag: "content-extra-in-migrated",
-      contentLog: `innerText snapshot exists only on migrated.\n\n${formatContentLogEnvironmentBlock("MIGRATED", migN)}`,
-    };
-  }
-  if (prodHas && !migHas) {
-    const prodN = normalizeInnerTextForCompare(
-      fs.readFileSync(prodPath, "utf8")
-    );
-    return {
-      contentMatch: false,
-      contentTag: "content-missing-in-migrated",
-      contentLog: `innerText snapshot missing on migrated.\n\n${formatContentLogEnvironmentBlock("PROD", prodN)}`,
-    };
-  }
+  const prodN = prodHas
+    ? normalizeInnerTextForCompare(fs.readFileSync(prodPath, "utf8"))
+    : "";
+  const migN = migHas
+    ? normalizeInnerTextForCompare(fs.readFileSync(migPath, "utf8"))
+    : "";
 
-  const prodRaw = fs.readFileSync(prodPath, "utf8");
-  const migRaw = fs.readFileSync(migPath, "utf8");
-  const prodN = normalizeInnerTextForCompare(prodRaw);
-  const migN = normalizeInnerTextForCompare(migRaw);
-  if (prodN === migN) {
-    return {
-      contentMatch: true,
-      contentTag: "content-match",
-      contentLog: null,
-    };
-  }
+  return buildContentComparisonData(prodN, migN, { prodHas, migHas });
+}
 
-  return {
-    contentMatch: false,
-    contentTag: "content-mismatch",
-    contentLog: formatContentMismatchLog(prodN, migN),
+function writePageContentDiffJson(diffFolder, meta, components) {
+  if (!components.length) return;
+
+  fs.mkdirSync(diffFolder, { recursive: true });
+  const filePath = path.join(diffFolder, "content-diff.json");
+  const doc = {
+    url: meta.url,
+    prodUrl: meta.prodUrl,
+    migratedUrl: meta.migratedUrl,
+    generatedAt: new Date().toISOString(),
+    components,
   };
+  fs.writeFileSync(filePath, JSON.stringify(doc, null, 2), "utf8");
+  console.log(`📝 Content diff JSON saved: ${filePath}`);
 }
 
 function stripDomain(url) {

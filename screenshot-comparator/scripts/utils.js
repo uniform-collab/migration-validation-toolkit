@@ -173,6 +173,84 @@ export function formatContentMismatchLog(prodNormalized, migratedNormalized) {
   ].join("\n");
 }
 
+function contentSideSnapshot(normalizedText, { excerpt = null } = {}) {
+  const normalized = String(normalizedText ?? "");
+  if (!normalized) return null;
+  return {
+    normalized,
+    excerpt: excerpt ?? normalized,
+  };
+}
+
+/**
+ * Structured innerText comparison for logs and per-page content-diff.json.
+ * @returns {{ contentMatch, contentTag, contentLog, jsonEntry }}
+ */
+export function buildContentComparisonData(
+  prodNormalized,
+  migratedNormalized,
+  { prodHas, migHas }
+) {
+  if (!prodHas && !migHas) {
+    return {
+      contentMatch: null,
+      contentTag: "content-not-captured",
+      contentLog:
+        "No .innerText.txt sidecars. Capture with ENABLE_CONTENT_COMPARISON=1 when running screenshots.",
+      jsonEntry: null,
+    };
+  }
+  if (!prodHas && migHas) {
+    const migN = String(migratedNormalized ?? "");
+    return {
+      contentMatch: false,
+      contentTag: "content-extra-in-migrated",
+      contentLog: `innerText snapshot exists only on migrated.\n\n${formatContentLogEnvironmentBlock("MIGRATED", migN)}`,
+      jsonEntry: {
+        prod: null,
+        migrated: contentSideSnapshot(migN),
+      },
+    };
+  }
+  if (prodHas && !migHas) {
+    const prodN = String(prodNormalized ?? "");
+    return {
+      contentMatch: false,
+      contentTag: "content-missing-in-migrated",
+      contentLog: `innerText snapshot missing on migrated.\n\n${formatContentLogEnvironmentBlock("PROD", prodN)}`,
+      jsonEntry: {
+        prod: contentSideSnapshot(prodN),
+        migrated: null,
+      },
+    };
+  }
+
+  const prodN = String(prodNormalized ?? "");
+  const migN = String(migratedNormalized ?? "");
+  if (prodN === migN) {
+    return {
+      contentMatch: true,
+      contentTag: "content-match",
+      contentLog: null,
+      jsonEntry: null,
+    };
+  }
+
+  const { prod: prodExcerpt, mig: migExcerpt } = extractInnerTextDiffExcerpts(
+    prodN,
+    migN
+  );
+  return {
+    contentMatch: false,
+    contentTag: "content-mismatch",
+    contentLog: formatContentMismatchLog(prodN, migN),
+    jsonEntry: {
+      prod: contentSideSnapshot(prodN, { excerpt: prodExcerpt }),
+      migrated: contentSideSnapshot(migN, { excerpt: migExcerpt }),
+    },
+  };
+}
+
 /** Normalize innerText for comparison (whitespace-insensitive). */
 export function normalizeInnerTextForCompare(raw) {
   return String(raw ?? "")
