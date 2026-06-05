@@ -218,11 +218,13 @@ async function doWork(obj) {
     const totalMismatchScore =
       totalHeight > 0 ? totalWeightedMismatch / totalHeight : null;
 
+    let contentDiffJson = null;
     if (contentComparison) {
-      writePageContentDiffJson(
+      contentDiffJson = writePageContentDiffJson(
         diffFolder,
         { url: relativeUrl, prodUrl, migratedUrl },
-        contentDiffJsonComponents
+        contentDiffJsonComponents,
+        outputDir
       );
     }
 
@@ -234,6 +236,7 @@ async function doWork(obj) {
           : null,
       tag: getDiffTag(totalMismatchScore),
       components: results,
+      contentDiffJson,
     };
   } catch (error) {
     console.error(`❌ Error processing ${prodUrl}:`, error);
@@ -289,8 +292,8 @@ function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
   return buildContentComparisonData(prodN, migN, { prodHas, migHas });
 }
 
-function writePageContentDiffJson(diffFolder, meta, components) {
-  if (!components.length) return;
+function writePageContentDiffJson(diffFolder, meta, components, outputDir) {
+  if (!components.length) return null;
 
   fs.mkdirSync(diffFolder, { recursive: true });
   const filePath = path.join(diffFolder, "content-diff.json");
@@ -303,6 +306,7 @@ function writePageContentDiffJson(diffFolder, meta, components) {
   };
   fs.writeFileSync(filePath, JSON.stringify(doc, null, 2), "utf8");
   console.log(`📝 Content diff JSON saved: ${filePath}`);
+  return path.relative(outputDir, filePath);
 }
 
 function stripDomain(url) {

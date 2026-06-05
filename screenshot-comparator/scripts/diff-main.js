@@ -147,6 +147,15 @@ function pickWorstTag(tags) {
   return worst ?? 'unknown';
 }
 
+function attachmentMarker(outputDir, relativePath) {
+  if (!relativePath) return null;
+  const normalized = path.relative(
+    outputDir,
+    path.join(outputDir, relativePath)
+  );
+  return `[[ATTACHMENT|${normalized}]]`;
+}
+
 function makeComponentTestCase(result, comp, outputDir) {
   const mismatchStr = comp.mismatch != null ? comp.mismatch.toFixed(2) : 'NaN';
   const tag = comp.tag ?? result.tag ?? 'unclassified';
@@ -228,11 +237,15 @@ function generateXmlReport(results) {
       if (c.diffImg)  out.push({ path: c.diffImg });
       return out;
     });
+    if (r.contentDiffJson) {
+      attachments.push({ path: r.contentDiffJson });
+    }
 
     const bodyTag = pickWorstTag(bodyComps.map(c => c.tag));
 
     const attachmentBlock = attachments
-      .map(a => `[[ATTACHMENT|${path.relative(outputDir, path.join(outputDir, a.path))}]]`)
+      .map((a) => attachmentMarker(outputDir, a.path))
+      .filter(Boolean)
       .join('\n');
 
     const tc = {
@@ -403,6 +416,11 @@ function generateContentXmlReport(results) {
 
     const worstTag = pickWorstContentTag(contentFails.map((c) => c.contentTag));
 
+    const attachmentBlock = attachmentMarker(outputDir, r.contentDiffJson) ?? "";
+    const sysoutBody = attachmentBlock
+      ? `${lines}\n\n${attachmentBlock}`
+      : lines;
+
     cases.push({
       "@name": `${r.url}`,
       "@classname": worstTag,
@@ -419,7 +437,7 @@ function generateContentXmlReport(results) {
         "@message": `innerText mismatch for ${r.url}`,
         "#": lines,
       },
-      "system-out": { "#": `<![CDATA[\n${lines}\n]]>` },
+      "system-out": { "#": `<![CDATA[\n${sysoutBody}\n]]>` },
     });
   }
 
