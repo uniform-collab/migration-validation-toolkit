@@ -8,6 +8,7 @@ import {
   isVideo,
   extractCandidateUrl,
   isAllowedMediaUrl,
+  extractInnerTextForContentCompare,
   isContentComparisonEnabled,
   withMigratedScreenshotAccess,
 } from "./utils.js";
@@ -645,7 +646,7 @@ async function screenshotComponents(
           `${comp.name}${isStage ? "_migrated" : "_prod"}.innerText.txt`
         );
         const rawInnerText = await element.evaluate(
-          (el) => el.innerText ?? ""
+          extractInnerTextForContentCompare
         );
         fs.writeFileSync(textPath, rawInnerText, "utf8");
         console.log(`📝 Component innerText saved: ${textPath}`);

@@ -251,6 +251,91 @@ export function buildContentComparisonData(
   };
 }
 
+/**
+ * Extract innerText for content comparison.
+ * Inserts spaces between adjacent inline elements (e.g. </span><span>, </a><a>)
+ * when HTML has no whitespace text node between them.
+ * Intended for Playwright element.evaluate().
+ */
+export function extractInnerTextForContentCompare(el) {
+  const inlineTags = new Set([
+    "A",
+    "SPAN",
+    "EM",
+    "STRONG",
+    "B",
+    "I",
+    "U",
+    "SMALL",
+    "SUB",
+    "SUP",
+    "CODE",
+    "LABEL",
+    "ABBR",
+    "CITE",
+    "Q",
+    "MARK",
+    "TIME",
+    "DATA",
+    "BUTTON",
+  ]);
+
+  const clone = el.cloneNode(true);
+
+  insertSpacesBetweenAdjacentInlineElements(clone);
+
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  // Off-screen only — visibility:hidden makes innerText empty in Chromium.
+  host.style.cssText =
+    "position:fixed;left:-10000px;top:0;width:max-content;max-width:1280px;pointer-events:none;z-index:-1;";
+  host.appendChild(clone);
+  document.body.appendChild(host);
+
+  try {
+    const text = clone.innerText ?? "";
+    if (text.trim()) return text;
+  } finally {
+    host.remove();
+  }
+
+  return el.innerText ?? "";
+
+  function isInlineElement(node) {
+    if (node.nodeType !== 1) return false;
+    if (inlineTags.has(node.tagName)) return true;
+    try {
+      const display = getComputedStyle(node).display;
+      return (
+        display === "inline" ||
+        display === "inline-block" ||
+        display.startsWith("inline")
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function insertSpacesBetweenAdjacentInlineElements(root) {
+    const stack = [root];
+    while (stack.length) {
+      const parent = stack.pop();
+      const nodes = [...parent.childNodes];
+      for (let i = nodes.length - 2; i >= 0; i--) {
+        const cur = nodes[i];
+        const next = nodes[i + 1];
+        if (cur.nodeType !== 1 || next.nodeType !== 1) continue;
+        if (isInlineElement(cur) && isInlineElement(next)) {
+          parent.insertBefore(document.createTextNode(" "), next);
+        }
+      }
+      for (const n of parent.childNodes) {
+        if (n.nodeType === 1) stack.push(n);
+      }
+    }
+  }
+}
+
 /** Normalize innerText for comparison (whitespace-insensitive). */
 export function normalizeInnerTextForCompare(raw) {
   return String(raw ?? "")
