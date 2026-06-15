@@ -278,7 +278,9 @@ async function screenshotPageComponents(
         console.log("🗑️ Removing embed div:", el.id);
         el.remove();
       });
-      document.querySelectorAll('[class*="breadcrumb"]').forEach((el) => {
+      document.querySelectorAll(
+        '[class*="breadcrumb"]:not(.category-breadcrumb)'
+      ).forEach((el) => {
         console.log("🗑️ Removing breadcrumb element:", el.className);
         el.remove();
       });
