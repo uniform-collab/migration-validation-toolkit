@@ -10,6 +10,8 @@ import {
   isAllowedMediaUrl,
   extractInnerTextForContentCompare,
   isContentComparisonEnabled,
+  isProdVercelMirror,
+  vercelAutomationBypassHeaders,
   withMigratedScreenshotAccess,
 } from "./utils.js";
 import { loadSelectorMap } from "./selector-map.js";
@@ -146,12 +148,22 @@ async function screenshotPageComponents(
   });
 
   try {
-    if (isStage && process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-      await page.setExtraHTTPHeaders({
-        "x-vercel-protection-bypass":
-          process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
-        "x-vercel-set-bypass-cookie": "true",
-      });
+    // Vercel deployment protection bypass:
+    //  - migrated/stage: always Vercel, always try to bypass
+    //  - prod: only when PROD_WEBSITE_VERCEL_MIRROR=true (prod URL is a Vercel mirror)
+    const needsVercelBypass = isStage || isProdVercelMirror();
+    const bypassHeaders = needsVercelBypass
+      ? vercelAutomationBypassHeaders()
+      : null;
+    if (needsVercelBypass && !bypassHeaders) {
+      console.warn(
+        `⚠️ VERCEL_AUTOMATION_BYPASS_SECRET is not set; ${
+          isStage ? "migrated" : "prod (Vercel mirror)"
+        } site may be blocked by Vercel deployment protection.`
+      );
+    }
+    if (bypassHeaders) {
+      await page.setExtraHTTPHeaders(bypassHeaders);
     }
 
     const navigationUrl = isStage ? withMigratedScreenshotAccess(url) : url;

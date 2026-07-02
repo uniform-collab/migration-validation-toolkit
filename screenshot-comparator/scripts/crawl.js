@@ -1,9 +1,22 @@
 import axios from "axios";
 import { load } from "cheerio";
 import fs from "fs";
-import { env } from "./utils.js";
+import { env, prodVercelBypassHeaders } from "./utils.js";
 import dotenv from 'dotenv';
 dotenv.config();
+
+// When PROD_WEBSITE_URL points at a Vercel deployment (prod-mirror), all
+// crawled URLs live on that Vercel deployment and need the automation bypass
+// secret to get past deployment protection.
+const prodRequestHeaders = prodVercelBypassHeaders();
+const axiosRequestConfig = prodRequestHeaders
+  ? { headers: prodRequestHeaders }
+  : undefined;
+if (prodRequestHeaders) {
+  console.log(
+    "🔓 Using Vercel automation bypass header for prod requests (PROD_WEBSITE_VERCEL_MIRROR=true)."
+  );
+}
 
 const visitedPages = new Set();
 let pagesToVisit = [];
@@ -51,7 +64,7 @@ async function crawl(baseUrl) {
         console.log(`Crawling: ${currentPage}`);
         visitedPages.add(currentPage);
 
-        const response = await axios.get(currentPage);
+        const response = await axios.get(currentPage, axiosRequestConfig);
         const $ = load(response.data);
 
         // Collect all links on the page

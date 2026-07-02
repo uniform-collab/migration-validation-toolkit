@@ -15,6 +15,40 @@ export function isContentComparisonEnabled() {
 }
 
 /**
+ * When truthy (1, true, yes, on), PROD_WEBSITE_URL points at a Vercel deployment
+ * (e.g. a prod-mirror). Requests to it need the Vercel automation bypass secret,
+ * just like the migrated/stage site.
+ */
+export function isProdVercelMirror() {
+  const v = String(process.env.PROD_WEBSITE_VERCEL_MIRROR || "")
+    .trim()
+    .toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Vercel deployment protection bypass headers (paired header + cookie).
+ * Returns null when VERCEL_AUTOMATION_BYPASS_SECRET is not set.
+ */
+export function vercelAutomationBypassHeaders() {
+  const secret = String(process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "").trim();
+  if (!secret) return null;
+  return {
+    "x-vercel-protection-bypass": secret,
+    "x-vercel-set-bypass-cookie": "true",
+  };
+}
+
+/**
+ * Vercel bypass headers to use when fetching PROD_WEBSITE_URL. Returns null
+ * unless PROD_WEBSITE_VERCEL_MIRROR is enabled and the bypass secret is set.
+ */
+export function prodVercelBypassHeaders() {
+  if (!isProdVercelMirror()) return null;
+  return vercelAutomationBypassHeaders();
+}
+
+/**
  * Append migrated-site visual testing access query params for screenshot workers.
  * Uses VERCEL_PREVIEW_SECRET; leaves URL unchanged when secret is unset.
  */
