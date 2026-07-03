@@ -222,56 +222,17 @@ function generateXmlReport(results) {
     if (!r?.components?.length) continue;
 
     const bodyComps = r.components.filter(c => !isHeaderName(c.component) && !isFooterName(c.component));
-    const bodyDiffs = bodyComps.filter(c => c.match === false || (typeof c.mismatch === 'number' && c.mismatch > 0));
 
-    if (bodyDiffs.length === 0) continue;
-
-    const tableText = bodyComps
-      .map(c => `• ${c.component}: ${c.mismatch != null ? c.mismatch.toFixed(2) + '%' : 'N/A'} ${c.tag ? '[' + c.tag + ']' : ''}`)
-      .join('\n');
-
-    const attachments = bodyComps.flatMap(c => {
-      const out = [];
-      if (c.prodImg)  out.push({ path: c.prodImg });
-      if (c.stageImg) out.push({ path: c.stageImg });
-      if (c.diffImg)  out.push({ path: c.diffImg });
-      return out;
-    });
-    if (r.contentDiffJson) {
-      attachments.push({ path: r.contentDiffJson });
+    for (const c of bodyComps) {
+      overallCases.push(makeComponentTestCase(r, c, outputDir));
     }
-
-    const bodyTag = pickWorstTag(bodyComps.map(c => c.tag));
-
-    const attachmentBlock = attachments
-      .map((a) => attachmentMarker(outputDir, a.path))
-      .filter(Boolean)
-      .join('\n');
-
-    const tc = {
-      '@name': `${r.url}`,
-      '@classname': bodyTag,
-      properties: {
-        property: [
-          { '@name': 'mismatchTag', '@value': bodyTag ?? 'undefined' },
-          { '@name': 'mismatchPercentage', '@value': 'N/A' },
-        ],
-      },
-      failure: {
-        '@message': `Visual mismatch (excluding header/footer) for ${r.url}`,
-        '#': `Body components have differences. See details below.`,
-      },
-      'system-out': { '#': `<![CDATA[\n${tableText}\n\n${attachmentBlock}\n]]>` },
-    };
-
-    overallCases.push(tc);
   }
 
   const overallSuite = {
     testsuite: {
       '@name': 'Visual Regression (without header/footer)',
       '@tests': overallCases.length,
-      '@failures': overallCases.length,
+      '@failures': overallCases.filter(tc => !!tc.failure).length,
       testcase: overallCases,
     },
   };
