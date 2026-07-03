@@ -354,6 +354,36 @@ function pickWorstContentTag(tags) {
   return worst ?? "unknown";
 }
 
+function makeComponentContentTestCase(result, comp) {
+  const tag = comp.contentTag ?? "unknown";
+
+  const sysoutParts = [`• ${comp.component}: [${tag}]`];
+  if (comp.contentLog) sysoutParts.push(comp.contentLog);
+  const sysout = sysoutParts.join("\n");
+
+  const tc = {
+    "@name": `${result.url} :: ${comp.component}`,
+    "@classname": tag,
+    properties: {
+      property: [
+        { "@name": "url", "@value": result.url },
+        { "@name": "component", "@value": comp.component },
+        { "@name": "contentTag", "@value": tag },
+      ],
+    },
+    "system-out": { "#": `<![CDATA[\n${sysout}\n]]>` },
+  };
+
+  if (comp.contentMatch === false) {
+    tc.failure = {
+      "@message": `innerText mismatch in ${comp.component} for ${result.url}`,
+      "#": comp.contentLog ?? `[${tag}]`,
+    };
+  }
+
+  return tc;
+}
+
 function generateContentXmlReport(results) {
   if (!isContentComparisonEnabled()) return;
 
@@ -365,48 +395,17 @@ function generateContentXmlReport(results) {
     const bodyComps = r.components.filter(
       (c) => !isHeaderName(c.component) && !isFooterName(c.component)
     );
-    const contentFails = bodyComps.filter((c) => c.contentMatch === false);
-    if (contentFails.length === 0) continue;
 
-    const lines = contentFails
-      .map(
-        (c) =>
-          `• ${c.component}: [${c.contentTag}]${c.contentLog ? "\n" + c.contentLog : ""}`
-      )
-      .join("\n\n");
-
-    const worstTag = pickWorstContentTag(contentFails.map((c) => c.contentTag));
-
-    const attachmentBlock = attachmentMarker(outputDir, r.contentDiffJson) ?? "";
-    const sysoutBody = attachmentBlock
-      ? `${lines}\n\n${attachmentBlock}`
-      : lines;
-
-    cases.push({
-      "@name": `${r.url}`,
-      "@classname": worstTag,
-      properties: {
-        property: [
-          { "@name": "url", "@value": r.url },
-          {
-            "@name": "contentDiffComponents",
-            "@value": String(contentFails.length),
-          },
-        ],
-      },
-      failure: {
-        "@message": `innerText mismatch for ${r.url}`,
-        "#": lines,
-      },
-      "system-out": { "#": `<![CDATA[\n${sysoutBody}\n]]>` },
-    });
+    for (const c of bodyComps) {
+      cases.push(makeComponentContentTestCase(r, c));
+    }
   }
 
   const suite = {
     testsuite: {
       "@name": "Content comparison (innerText)",
       "@tests": cases.length,
-      "@failures": cases.length,
+      "@failures": cases.filter((tc) => !!tc.failure).length,
       testcase: cases,
     },
   };
