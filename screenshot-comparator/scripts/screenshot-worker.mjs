@@ -611,8 +611,11 @@ async function screenshotComponents(
         { selector: comp.selector, compName: comp.name }
       );
 
+      const componentSubDir = path.join(outputDir, comp.name);
+      fs.mkdirSync(componentSubDir, { recursive: true });
+
       const filePath = path.join(
-        outputDir,
+        componentSubDir,
         `${comp.name}${isStage ? "_migrated" : "_prod"}.png`
       );
 
@@ -656,7 +659,7 @@ async function screenshotComponents(
 
       if (saveInnerText) {
         const textPath = path.join(
-          outputDir,
+          componentSubDir,
           `${comp.name}${isStage ? "_migrated" : "_prod"}.innerText.txt`
         );
         const rawInnerText = await element.evaluate(
@@ -832,7 +835,10 @@ async function freezeAnimations(page) {
 }
 
 function encodeURLToFolder(url) {
-  const illegalCharsRegex = /[<>:"/\\|?*\0]/g;
+  // `/` is intentionally excluded: we preserve URL path structure as nested
+  // directories. Illegal chars are percent-encoded per segment so that each
+  // segment stays a valid file/folder name on Windows/macOS/Linux.
+  const illegalCharsRegex = /[<>:"\\|?*\0]/g;
 
   let pathname;
   try {
@@ -847,10 +853,14 @@ function encodeURLToFolder(url) {
 
   return pathname
     .replace(/^\/+|\/+$/g, "")
-    .replace(/\//g, "_")
-    .replace(illegalCharsRegex, (char) =>
-      `%${char.charCodeAt(0).toString(16)}`
-    );
+    .split("/")
+    .filter(Boolean)
+    .map((segment) =>
+      segment.replace(illegalCharsRegex, (char) =>
+        `%${char.charCodeAt(0).toString(16)}`
+      )
+    )
+    .join("/");
 }
 
 async function cropImageHeightIfNeeded(imgPath, maxHeight = 9000) {

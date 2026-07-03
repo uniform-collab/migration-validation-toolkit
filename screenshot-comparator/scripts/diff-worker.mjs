@@ -34,17 +34,10 @@ async function doWork(obj) {
   );
   const diffFolder = path.join(outputDir, "diffs", folderName);
 
-  const prodFiles = fs.existsSync(prodFolder)
-    ? fs.readdirSync(prodFolder).filter((f) => f.endsWith("_prod.png"))
-    : [];
-
-  const migratedFiles = fs.existsSync(migratedFolder)
-    ? fs.readdirSync(migratedFolder).filter((f) => f.endsWith("_migrated.png"))
-    : [];
-
-  const prodComponentNames = prodFiles.map((f) => f.replace(/_prod\.png$/, ""));
-  const migratedComponentNames = migratedFiles.map((f) =>
-    f.replace(/_migrated\.png$/, "")
+  const prodComponentNames = listComponentNames(prodFolder, "_prod.png");
+  const migratedComponentNames = listComponentNames(
+    migratedFolder,
+    "_migrated.png"
   );
 
   const allComponentNames = new Set([
@@ -56,7 +49,6 @@ async function doWork(obj) {
   const contentDiffJsonComponents = [];
   let totalWeightedMismatch = 0;
   let totalHeight = 0;
-  let hasDiffImages = false;
 
   try {
     const prodRedirectPath = path.join(prodFolder, "redirect.txt");
@@ -85,13 +77,22 @@ async function doWork(obj) {
 
     console.log(`🔍 Comparing ${allComponentNames.size} components for URL: ${relativeUrl}`);
     for (const componentName of allComponentNames) {
-      const prodImgPath = path.join(prodFolder, `${componentName}_prod.png`);
+      const prodImgPath = path.join(
+        prodFolder,
+        componentName,
+        `${componentName}_prod.png`
+      );
       console.log("📷 PROD image path:", prodImgPath);
       const stageImgPath = path.join(
         migratedFolder,
+        componentName,
         `${componentName}_migrated.png`
       );
-      const diffImgPath = path.join(diffFolder, `${componentName}_diff.png`);
+      const diffImgPath = path.join(
+        diffFolder,
+        componentName,
+        `${componentName}_diff.png`
+      );
 
       const prodExists = fs.existsSync(prodImgPath);
       const stageExists = fs.existsSync(stageImgPath);
@@ -188,10 +189,7 @@ async function doWork(obj) {
       }
 
       if (!match && diffBuffer) {
-        if (!hasDiffImages) {
-          fs.mkdirSync(diffFolder, { recursive: true }); // Create only when needed
-          hasDiffImages = true;
-        }
+        fs.mkdirSync(path.dirname(diffImgPath), { recursive: true });
         fs.writeFileSync(diffImgPath, diffBuffer);
         console.log("📷 Diff image saved to:", diffImgPath);
       }
@@ -273,10 +271,12 @@ function contentSidecarsIfEnabled(
 function compareInnerTextSidecars(prodFolder, migratedFolder, componentName) {
   const prodPath = path.join(
     prodFolder,
+    componentName,
     `${componentName}_prod.innerText.txt`
   );
   const migPath = path.join(
     migratedFolder,
+    componentName,
     `${componentName}_migrated.innerText.txt`
   );
   const prodHas = fs.existsSync(prodPath);
@@ -372,7 +372,27 @@ async function compareImages(prodImgPath, stageImgPath) {
   });
 }
 
+/**
+ * List component subfolders under a page folder (e.g. `component-00`, `component-01`).
+ * Only returns names for which the expected image file exists inside, so we skip
+ * stray directories that don't contain a captured component.
+ */
+function listComponentNames(pageFolder, imageSuffix) {
+  if (!fs.existsSync(pageFolder)) return [];
+  return fs
+    .readdirSync(pageFolder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) =>
+      fs.existsSync(path.join(pageFolder, name, `${name}${imageSuffix}`))
+    );
+}
+
 function getFileName(input) {
+  // Must produce the exact same relative path that `encodeURLToFolder` in
+  // screenshot-worker.mjs used to create the folder — otherwise we'd look
+  // in the wrong place. Nested per URL path, percent-encoding illegal chars
+  // per segment.
   let pathname = input;
 
   try {
@@ -382,17 +402,19 @@ function getFileName(input) {
     pathname = input;
   }
 
-  pathname = pathname
-    .replace(/^\/+/, "")  
-    .replace(/\/+$/, ""); 
+  pathname = pathname.replace(/^\/+|\/+$/g, "");
 
   if (!pathname) return "index";
 
   return pathname
-    .split("/")            
+    .split("/")
     .filter(Boolean)
-    .join("_")             
-    .replace(/[<>:"\\|?*\0]/g, "");
+    .map((segment) =>
+      segment.replace(/[<>:"\\|?*\0]/g, (char) =>
+        `%${char.charCodeAt(0).toString(16)}`
+      )
+    )
+    .join("/");
 }
 
 function getDiffTag(mismatch) {

@@ -454,17 +454,32 @@ function generateContentXmlReport(results) {
   console.log("📝 Wrote:", path.join(outputDir, "results_content.xml"));
 }
 
-function encodeURLToFilename(url) {
-  const illegalCharsRegex = /[<>:"\/\\|?*\0]/g;
-  return url.replace(illegalCharsRegex, ch => `%${ch.charCodeAt(0).toString(16)}`);
-}
-
 function getFileName(url) {
-  url = url.replace(env("STAGE_WEBSITE_URL"), "");
-  url = url.replace(env("PROD_WEBSITE_URL"), "");
-  url = url.startsWith("/") ? url.substring(1) : url;
-  const filename = encodeURLToFilename(url);
-  return filename || "index";
+  // Must produce the same nested path as `encodeURLToFolder` in
+  // screenshot-worker.mjs so that page folders can be located on disk.
+  let pathname = url
+    .replace(env("STAGE_WEBSITE_URL"), "")
+    .replace(env("PROD_WEBSITE_URL"), "");
+
+  try {
+    pathname = new URL(pathname).pathname;
+  } catch {
+    // already a relative path
+  }
+
+  pathname = pathname.replace(/^\/+|\/+$/g, "");
+
+  if (!pathname) return "index";
+
+  return pathname
+    .split("/")
+    .filter(Boolean)
+    .map((segment) =>
+      segment.replace(/[<>:"\\|?*\0]/g, (char) =>
+        `%${char.charCodeAt(0).toString(16)}`
+      )
+    )
+    .join("/");
 }
 
 // https://img.uniform.global/.../<assetId>-<filename.ext> → <filename.ext>
