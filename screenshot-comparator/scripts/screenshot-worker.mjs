@@ -525,7 +525,7 @@ async function getCaptureSelectors(page, map) {
       return selectors;
     }
 
-    const sections =
+    const rawSections =
       m.items.strategy === "directChildren"
         ? Array.from(scope.children).filter(
             (el) =>
@@ -534,6 +534,18 @@ async function getCaptureSelectors(page, map) {
               el.tagName !== "STYLE"
           )
         : Array.from(scope.querySelectorAll(m.items.selector));
+
+    // querySelectorAll can match both a component and another matching
+    // component nested inside it (e.g. a card rendered inside a hero block).
+    // Keep only the outermost match so nested markup on one site doesn't
+    // inflate its component count relative to a site where the same visual
+    // block is flat markup.
+    const sections =
+      m.items.strategy === "directChildren"
+        ? rawSections
+        : rawSections.filter(
+            (el) => !rawSections.some((other) => other !== el && other.contains(el))
+          );
 
     let index = 0;
     for (const el of sections) {
