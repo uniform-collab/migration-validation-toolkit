@@ -193,6 +193,30 @@ export function loadPreviousReport(reportDir, explicitPath, reportName = "report
  * Exposes `.has()` rather than a bare function so every existing call site — and
  * failedPagePaths' `new Set()` default — keeps working unchanged.
  */
+/**
+ * The mirror image of makePathExcluder: an ALLOWLIST. Same entry syntax (exact path or
+ * `*` glob), but an EMPTY spec means "everything is in scope" rather than "nothing is",
+ * so the flag is opt-in and omitting it changes no behaviour.
+ *
+ * Why both exist. Exclude answers "the migration deliberately never produces this URL";
+ * include answers "the migrated frontend does not cover this page YET". The second is the
+ * normal state of a migration in progress - a frontend rendering 1 of 4416 pages would
+ * otherwise score ~0% and bury every real diff under 4415 missing ones. Listing the
+ * negative space is not an option there; listing the positive space is.
+ *
+ * The two are independent: a page must be included AND not excluded. An allowlisted page
+ * that is also excluded stays out - the exclusion states something about the MIGRATION,
+ * which outranks a statement about frontend coverage.
+ */
+export function makePathIncluder(spec) {
+  const patterns = (typeof spec === "string" ? spec.split(",") : Array.isArray(spec) ? spec : [])
+    .map((s) => String(s).trim())
+    .filter(Boolean);
+  if (!patterns.length) return { active: false, has: () => true, size: 0 };
+  const matcher = makePathExcluder(patterns);
+  return { active: true, has: (p) => matcher.has(p), size: patterns.length };
+}
+
 export function makePathExcluder(spec) {
   const patterns = (typeof spec === "string" ? spec.split(",") : Array.isArray(spec) ? spec : [])
     .map((s) => String(s).trim())

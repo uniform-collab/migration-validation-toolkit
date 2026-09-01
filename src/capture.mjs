@@ -5,7 +5,7 @@
  * --capture-mode (content | screenshots | full). Capturing both in a single
  * navigation is the whole point: it avoids loading every page twice.
  *
- *   prod expected:  --base-url <prod>  --sitemap <url>
+ *   prod expected:  --base-url <prod>  --sitemap <url>  [--include /a,/b]
  *   stage actual:   --base-url <stage> --paths <expected/manifest.json> --stage
  *
  *   --capture-mode content      innerText only (images blocked; fast) [default]
@@ -49,6 +49,7 @@ import {
 import {
   parseArgs,
   requireArg,
+  makePathIncluder,
   pathToSlugDir,
   normalizeText,
   readJson,
@@ -127,6 +128,9 @@ console.log(`Capture mode: ${captureMode} (content=${doContent}, screenshots=${d
 
 const concurrency = Math.max(1, parseInt(args["concurrency"] || "6", 10) || 6);
 const limit = parseInt(args["limit"] || "0", 10) || 0;
+// Allowlist of paths the migrated frontend covers so far (exact or `*` glob).
+// Empty = the whole page list. See makePathIncluder.
+const includePaths = makePathIncluder(args["include"]);
 const resume = Boolean(args["resume"]);
 // Quick-validation: capture only the pages that FAILED (page score < 100) in the
 // previous content report.json, so a fix can be re-checked in seconds instead of
@@ -691,6 +695,22 @@ async function captureV2(page, pagePath, rec, quiescer) {
 }
 
 let allItems = await getPathsToCapture();
+
+// Frontend-coverage allowlist. Applied to the PAGE LIST rather than at compare time so a
+// partially-built frontend costs nothing to test: capturing 4416 pages to score 1 is the
+// expensive half. Empty = capture everything, so omitting it changes nothing. Both sides
+// must use the same list, or the actual side is missing pages the expected side scored.
+if (includePaths.active) {
+  const before = allItems.length;
+  allItems = allItems.filter((it) => includePaths.has(it.path));
+  console.log(
+    `--include: ${includePaths.size} pattern(s) — capturing ${allItems.length} of ${before} pages.`
+  );
+  if (allItems.length === 0) {
+    console.error("--include matched no pages. Check the patterns against the page list.");
+    process.exit(1);
+  }
+}
 
 // Failed-only: keep just the pages that failed in the previous content report
 // (found in git history / --prev-report). Empty or missing report => capture the

@@ -112,26 +112,59 @@ function readJsonSafe(file) {
   }
 }
 
-function resolveRootItemPath(rootDir, files, override) {
-  if (override && override.trim()) return trimTrailingSlashes(override.trim());
-  const rootIndex = path.join(rootDir, "index.json");
-  if (fs.existsSync(rootIndex)) {
-    const json = readJsonSafe(rootIndex);
-    if (json?.ItemPath) return trimTrailingSlashes(json.ItemPath);
+/**
+ * Read ONLY `ItemPath` and `ID` out of an index.json, without parsing the file.
+ *
+ * Building the URL map needs exactly those two fields from every index.json in the tree —
+ * the renderings are read later, per page, and only for pages actually captured. Whether
+ * that is cheap depends entirely on the export: a presentation-only index.json is a few
+ * KB, but an export that embeds each rendering's rendered `Html` runs to ~1.5 MB per page
+ * (3.5 MB at the tail). At 4416 pages that is ~6.6 GB to parse — and the map was doing it
+ * TWICE, once to resolve the root ItemPath and once to build the map, which took the build
+ * from seconds to over ten minutes.
+ *
+ * So: read a bounded head of the file and pull the two scalars out with a regex. Both keys
+ * sit in the first object level ahead of the `Placeholders` array in every export seen so
+ * far, and HEAD_BYTES is far larger than that prefix. Anything that does not match falls
+ * back to a full parse, so an export that orders its keys differently is slower but still
+ * correct — never silently wrong.
+ */
+const HEAD_BYTES = 64 * 1024;
+
+function readIndexHeader(file) {
+  let head;
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.allocUnsafe(HEAD_BYTES);
+      const read = fs.readSync(fd, buf, 0, HEAD_BYTES, 0);
+      head = buf.toString("utf8", 0, read);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
   }
-  let shortest = null;
-  for (const file of files) {
-    const json = readJsonSafe(file);
-    const ip = json?.ItemPath;
-    if (!ip) continue;
-    if (shortest === null || ip.length < shortest.length) shortest = ip;
+  const itemPath = /"ItemPath"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head);
+  const id = /"ID"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head);
+  if (itemPath && id) {
+    return { ItemPath: JSON.parse(`"${itemPath[1]}"`), ID: JSON.parse(`"${id[1]}"`) };
   }
-  return shortest ? trimTrailingSlashes(shortest) : null;
+  // Unrecognised shape (reordered keys, or a prefix longer than HEAD_BYTES): pay for the
+  // full parse rather than dropping the page.
+  const json = readJsonSafe(file);
+  return json ? { ItemPath: json.ItemPath, ID: json.ID } : null;
 }
 
 /**
- * Read an item out of the frozen Sitecore export. Items are sharded by the first two
- * characters of their GUID: data/items/<lang>/<a>/<b>/<guid>.json.
+ * Read an item out of the frozen Sitecore export.
+ *
+ * Two export layouts are in the wild and BOTH must work, because a miss here is SILENT:
+ * the caller just falls back to slugifying ItemPath, which drops pages without erroring.
+ *   sharded  data/items/<lang>/<a>/<b>/<guid>.json   (first two GUID chars)
+ *   flat     data/items/<lang>/{<guid>}.json         (braces kept, one directory)
+ * The braces are part of the FILENAME in the flat form while the id inside index.json is
+ * bare, so both spellings are tried.
  */
 function readExportedItem(itemsRoot, rawId) {
   const id = String(rawId ?? "")
@@ -139,9 +172,15 @@ function readExportedItem(itemsRoot, rawId) {
     .trim()
     .toLowerCase();
   if (!itemsRoot || id.length < 2) return null;
-  const file = path.join(itemsRoot, id[0], id[1], `${id}.json`);
-  if (!fs.existsSync(file)) return null;
-  return readJsonSafe(file);
+  const candidates = [
+    path.join(itemsRoot, id[0], id[1], `${id}.json`),
+    path.join(itemsRoot, `{${id}}.json`),
+    path.join(itemsRoot, `${id}.json`),
+  ];
+  for (const file of candidates) {
+    if (fs.existsSync(file)) return readJsonSafe(file);
+  }
+  return null;
 }
 
 /**
@@ -164,7 +203,10 @@ function readExportedItem(itemsRoot, rawId) {
  */
 export function buildUrlToIndexMap(rootDir, rootItemPathOverride, itemsRoot) {
   const files = findIndexJsonFiles(rootDir);
-  const rootItemPath = resolveRootItemPath(rootDir, files, rootItemPathOverride);
+  // One header read per file, shared by the root resolution below and the map build, so a
+  // large export is scanned once rather than twice (see readIndexHeader).
+  const headers = new Map(files.map((f) => [f, readIndexHeader(f)]));
+  const rootItemPath = resolveRootItemPathFrom(rootDir, headers, rootItemPathOverride);
   if (!rootItemPath) {
     throw new Error(
       `Could not determine root ItemPath under ${rootDir}. Set TEST_SELECTOR_ITEM_ROOT_PATH.`
@@ -173,7 +215,7 @@ export function buildUrlToIndexMap(rootDir, rootItemPathOverride, itemsRoot) {
   const map = new Map();
   const stats = { fromSlug: 0, fromItemPath: 0, unresolved: 0, duplicates: 0 };
   for (const file of files) {
-    const json = readJsonSafe(file);
+    const json = headers.get(file);
     if (!json?.ItemPath) continue;
     const item = readExportedItem(itemsRoot, json.ID);
     let url = null;
@@ -193,6 +235,25 @@ export function buildUrlToIndexMap(rootDir, rootItemPathOverride, itemsRoot) {
     else map.set(url, file);
   }
   return { map, rootItemPath, files, stats };
+}
+
+/**
+ * Resolve the tree's root ItemPath from an already-read header map (see buildUrlToIndexMap).
+ * An explicit override wins; otherwise the tree root's own index.json, else the shortest
+ * ItemPath in the tree.
+ */
+function resolveRootItemPathFrom(rootDir, headers, override) {
+  if (override && override.trim()) return trimTrailingSlashes(override.trim());
+  const rootIndex = path.join(rootDir, "index.json");
+  const rootHead = headers.get(rootIndex);
+  if (rootHead?.ItemPath) return trimTrailingSlashes(rootHead.ItemPath);
+  let shortest = null;
+  for (const head of headers.values()) {
+    const ip = head?.ItemPath;
+    if (!ip) continue;
+    if (shortest === null || ip.length < shortest.length) shortest = ip;
+  }
+  return shortest ? trimTrailingSlashes(shortest) : null;
 }
 
 function hasSelector(rendering) {

@@ -84,6 +84,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--rebase <json>` | V2: `[{from,to}]` selector-prefix rewrites (legacy positional selectors). |
 | `--body-only false` | V2: include header/footer/analytics instead of main content only. |
 | `--exclude-components <names>` | V2: rendering names resolved and masked, but never compared. |
+| `--include /a,/b` | Allowlist of paths the migrated frontend covers so far (exact or `*` glob). Empty = the whole page list. See *Scoping a partially-built frontend*. |
 | `--concurrency <n>` | Parallel browser contexts. |
 | `--limit <n>` | Smoke mode: first N pages only. |
 | `--resume` | Skip pages already present in the output dataset. |
@@ -114,6 +115,7 @@ migration-validate compare --expected ./expected-v2 --actual ./actual-v2 \
 | `--mode v2` | Score V2 datasets (componentKey pairing) instead of V1 (DOM order). |
 | `--fail-under <n>` | Exit 1 when the overall score is below N. Omit to report only. |
 | `--exclude /a,/b` | Paths deliberately not migrated: listed, not scored. |
+| `--include /a,/b` | Allowlist of paths the frontend covers so far: everything else is out of scope entirely. Empty = whole site. |
 | `--missing-words <n>` | Component report: trim a one-sided component's text to N words (`0` = full, default 8). |
 | `--only-failed` / `--prev-report <path>` | Score only the previously-failing subset. |
 
@@ -124,7 +126,8 @@ migration-validate compare-screenshots --shots-dir <root> --report-dir ./tests \
   [--run <runId>] [--fail-under 95] [--strict] [--exclude /404]
 ```
 
-Pairs prod↔stage element screenshots by `componentKey`, pixel-diffs each pair, writes
+`--include` scopes it the same way `compare` does. Pairs prod↔stage element screenshots by
+`componentKey`, pixel-diffs each pair, writes
 `report-screenshots.md`/`.json` and a diff PNG per differing component. **Advisory by default**
 (exit 0 even below `--fail-under`) unless `--strict`.
 
@@ -207,6 +210,13 @@ instance. Both in-page resolvers (`src/lib/extract-selectors.mjs` for content,
 improving selector coverage does not renumber every component and unpair it from a frozen expected
 dataset.
 
+**Building the URL map does not parse the index.json files.** It needs only `ItemPath` and `ID` from
+each, and how expensive that is depends entirely on the export: a presentation-only `index.json` is
+a few KB, but an export that embeds each rendering's rendered `Html` runs to ~1.5 MB per page. At
+4416 pages that is ~6.6 GB — so the two scalars are read out of a bounded head of each file, with a
+full parse only as the fallback for an unrecognised key order. The renderings themselves are read
+later, per page, and only for pages actually captured.
+
 `--rebase` (`body > div:nth-of-type(2)` → `#wrapper`) is a leftover from when selectors were
 absolute positional paths; it is a no-op for class-anchored selectors and is kept only for older
 `index.json` trees.
@@ -216,6 +226,14 @@ absolute positional paths; it is a no-op for class-anchored selectors and is kep
 A page is only compared if its `index.json` can be found, and the lookup key is the page URL. That
 URL is **taken from the source CMS, not derived**: every item under `--items-root` carries the
 `Slug` the CMS itself resolved, and `index.json` carries that item's `ID`, so the two join exactly.
+
+Two item-export **layouts** are supported, because a miss here is silent — the lookup just falls
+back to slugifying, which drops pages without erroring:
+
+```
+sharded   <items-root>/<a>/<b>/<guid>.json     first two GUID characters
+flat      <items-root>/{<guid>}.json           braces kept, one directory
+```
 
 Slugifying the item path instead (the fallback when `--items-root` is omitted) cannot reproduce the
 CMS's URL rules and **silently drops pages** — an unfound URL is not an error, the page is simply
@@ -240,6 +258,25 @@ A page left with **no comparable component at all** (everything excluded or text
 under *No comparable components* and **left out of the score** — an empty element list weights to
 100, and a page where nothing was compared must not claim perfect parity. Likewise, pages with **no
 `index.json`** are listed under *No index.json* and left out of the score rather than scored 0.
+
+### Scoping a partially-built frontend (`--include`)
+
+`--exclude` and `--include` answer different questions and both are needed:
+
+| | question it answers | empty means |
+|---|---|---|
+| `--exclude` | "the migration deliberately never produces this URL" | nothing excluded |
+| `--include` | "the migrated frontend does not cover this page **yet**" | everything in scope |
+
+A migration in progress is the normal case for the second one. A frontend rendering 1 of 4416
+exported pages scores ~0% and buries every real diff under 4415 missing pages; listing the negative
+space is not an option there, listing the positive space is. Pass the same list to `capture` and to
+`compare` — on `capture` it filters the **page list**, so a partially-built frontend costs one page
+to test rather than 4416.
+
+The two are independent: a page must be included **and** not excluded. An allowlisted page that is
+also excluded stays out — an exclusion states something about the *migration*, which outranks a
+statement about frontend coverage.
 
 ---
 

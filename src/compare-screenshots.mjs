@@ -6,6 +6,7 @@
  *
  *   node compare-screenshots.mjs --shots-dir <root> --report-dir tests
  *        [--run <runId>] [--fail-under N] [--strict] [--exclude /a,/b]
+ *        [--include /a,/b]
  *
  * <root> holds the shared prod/ baseline plus one directory PER RUN,
  * runs/<runId>/{migrated,diff} (see capture.mjs / stage 6200) — screenshots live
@@ -55,6 +56,7 @@ import {
   loadPreviousReport,
   failedPagePaths,
   makePathExcluder,
+  makePathIncluder,
 } from "./lib/util.mjs";
 
 const args = parseArgs(process.argv.slice(2));
@@ -70,6 +72,8 @@ const prevReportArg = typeof args["prev-report"] === "string" ? args["prev-repor
 const onlyFailed = Boolean(args["only-failed"]);
 // Exact paths and `*` globs (e.g. `*/data/*`) — see makePathExcluder.
 const excludePaths = makePathExcluder(args["exclude"]);
+// Frontend-coverage allowlist, same meaning as in compare.mjs. Empty = whole site.
+const includePaths = makePathIncluder(args["include"]);
 
 const prodDir = path.join(shotsDir, "prod");
 
@@ -365,7 +369,10 @@ if (onlyFailed) {
   }
 }
 const candidatePaths = Object.entries(prodManifest.pages)
-  .filter(([p, rec]) => rec.status === 200 && !rec.noIndex && (!failedSet || failedSet.has(p)))
+  .filter(
+    ([p, rec]) =>
+      rec.status === 200 && !rec.noIndex && (!failedSet || failedSet.has(p)) && includePaths.has(p)
+  )
   .map(([p]) => p)
   .sort();
 
@@ -410,7 +417,7 @@ const redirectMismatches = pages.filter((p) => p.redirectMismatch);
 const prev = loadPreviousReport(reportDir, prevReportArg, "report-screenshots.json");
 let comparison = null;
 if (prev) {
-  const inScope = (p) => !failedSet || failedSet.has(p);
+  const inScope = (p) => (!failedSet || failedSet.has(p)) && includePaths.has(p);
   const prevPages = (prev.report.pages || []).filter((p) => inScope(p.path));
   const curDiffs = allDiffs;
   const prevDiffs = collectDiffs(prevPages);
