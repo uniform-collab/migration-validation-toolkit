@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CHA e2e report</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>CHA <strong>e2e report</strong></span>
+      </div>
+
+      <nav class="tabs" id="tabs">
+        <a href="#/overview" data-view="overview">Overview</a>
+        <a href="#/pages" data-view="pages">Pages</a>
+        <a href="#/components" data-view="components">Components</a>
+      </nav>
+
+      <div class="topbar-right">
+        <input
+          id="globalSearch"
+          class="search"
+          type="search"
+          placeholder="Search pages or components…  ( / )"
+          autocomplete="off"
+        />
+        <button id="themeToggle" class="icon-btn" title="Toggle theme">◐</button>
+        <button id="helpBtn" class="icon-btn" title="Keyboard shortcuts ( ? )">?</button>
+      </div>
+    </header>
+
+    <div id="runmeta" class="runmeta"></div>
+
+    <main id="view" class="view"><div class="loading">Loading reports…</div></main>
+
+    <div id="help" class="modal hidden">
+      <div class="modal-card">
+        <h3>Keyboard</h3>
+        <table class="kbd-table">
+          <tr><td><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></td><td>Overview / Pages / Components</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Focus search</td></tr>
+          <tr><td><kbd>j</kbd><kbd>k</kbd></td><td>Move through the current list</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>Open the selected row</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Back / close</td></tr>
+          <tr><td><kbd>[</kbd><kbd>]</kbd></td><td>Previous / next component (page detail)</td></tr>
+          <tr><td><kbd>d</kbd></td><td>Next component with a diff</td></tr>
+          <tr><td><kbd>t</kbd><kbd>i</kbd></td><td>Text / image tab of the open component</td></tr>
+          <tr><td><kbd>m</kbd></td><td>Cycle image mode (side-by-side → swipe → onion → diff)</td></tr>
+          <tr><td><kbd>r</kbd></td><td>Reload reports from disk</td></tr>
+        </table>
+        <button class="btn" id="helpClose">Close</button>
+      </div>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

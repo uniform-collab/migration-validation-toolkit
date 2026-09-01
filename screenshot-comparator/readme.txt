@@ -1,1 +1,0 @@
-don't use pnpm, use npm only because of the canvas package
