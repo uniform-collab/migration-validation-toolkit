@@ -8,6 +8,7 @@
  *   prod expected:  --base-url <prod>  --sitemap <url>  [--include /a,/b]
  *   stage actual:   --base-url <stage> --paths <expected/manifest.json> --stage
  *
+ *   --header "Name: value"      extra request header, repeatable (WAF/CDN bypass)
  *   --capture-mode content      innerText only (images blocked; fast) [default]
  *   --capture-mode screenshots  element screenshots only (V2)
  *   --capture-mode full         both, from the same loaded page (V2)
@@ -190,7 +191,42 @@ let sharpMod = null;
 // Header-only bypass on purpose: adding x-vercel-set-bypass-cookie makes Vercel
 // answer 307 (cookie-set redirect), which the redirect-less status check would
 // misread as non-200. The header alone passes every request.
-const extraHeaders = bypassSecret ? { "x-vercel-protection-bypass": bypassSecret } : {};
+//
+// --header "Name: value" (repeatable) is the general form, for a site fronted by
+// something other than Vercel. The canonical case is a WAF/CDN in front of the LEGACY
+// site that answers a plain crawler with a challenge page: the site owner issues a
+// bypass header and it goes here. This carries a credential the operator supplies; it
+// is not a way around a protection. With no header configured the capture simply
+// records whatever status the challenge returns and the run reports it.
+//
+// Applied on every path a request leaves by - the sitemap fetch, the redirect-less
+// status probe, and the browser context. parseArgs is last-wins, so a repeatable flag
+// has to be read off argv directly.
+function parseExtraHeaders(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== "--header") continue;
+    const raw = argv[i + 1];
+    if (!raw || raw.startsWith("--")) continue;
+    const sep = raw.indexOf(":");
+    if (sep <= 0) {
+      console.warn(`Ignoring --header "${raw}": expected "Name: value".`);
+      continue;
+    }
+    out[raw.slice(0, sep).trim()] = raw.slice(sep + 1).trim();
+    i++;
+  }
+  return out;
+}
+
+const extraHeaders = {
+  ...(bypassSecret ? { "x-vercel-protection-bypass": bypassSecret } : {}),
+  ...parseExtraHeaders(process.argv.slice(2)),
+};
+if (Object.keys(extraHeaders).length) {
+  // Names only - the values are secrets.
+  console.log(`Extra request headers: ${Object.keys(extraHeaders).join(", ")}`);
+}
 
 /** Fetch sitemap XML (following <sitemapindex> one level) -> normalized paths. */
 async function getSitemapPaths(sitemapUrl) {
