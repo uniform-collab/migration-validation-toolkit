@@ -133,10 +133,10 @@ function buildModel() {
   const datasets = {
     expected: EXPECTED_DIR_ARG
       ? path.resolve(EXPECTED_DIR_ARG)
-      : path.join(ROOT, "src/data/tests", mode === "v2" ? "expected-v2" : "expected"),
+      : path.join(ROOT, "src/data/tests", "expected-v2"),
     actual: ACTUAL_DIR_ARG
       ? path.resolve(ACTUAL_DIR_ARG)
-      : path.join(REPORT_DIR, mode === "v2" ? "actual-v2" : "actual"),
+      : path.join(REPORT_DIR, "actual-v2"),
   };
 
   /** path -> merged page record */

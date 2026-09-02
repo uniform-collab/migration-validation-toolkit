@@ -24,7 +24,6 @@ import path from "path";
 import http from "node:http";
 import https from "node:https";
 import { chromium } from "playwright";
-import { collectElementTexts } from "./lib/extract.mjs";
 import { collectComponentTexts } from "./lib/extract-selectors.mjs";
 import {
   buildUrlToIndexMap,
@@ -62,22 +61,16 @@ import {
 const args = parseArgs(process.argv.slice(2));
 const baseUrl = requireArg(args, "base-url").replace(/\/+$/, "");
 
-// V2 = selector-driven (index.json CssSelectors); V1 = manual selector-map.
-const mode = args["mode"] === "v2" ? "v2" : "v1";
-
-// Capture mode: what this pass produces. Screenshots are V2-only.
+// Capture mode: what this pass produces.
 const captureModeRaw = String(args["capture-mode"] || "content").toLowerCase();
 const captureMode = ["content", "screenshots", "full"].includes(captureModeRaw)
   ? captureModeRaw
   : "content";
 const doContent = captureMode === "content" || captureMode === "full";
 const wantShots = captureMode === "screenshots" || captureMode === "full";
-const doShots = wantShots && mode === "v2";
-if (wantShots && mode !== "v2") {
-  console.warn("Screenshots are V2-only; --capture-mode includes screenshots but mode is V1 — skipping screenshots.");
-}
+const doShots = wantShots;
 if (!doContent && !doShots) {
-  console.error(`Nothing to capture (capture-mode=${captureMode}, mode=${mode}). For screenshots, run with --mode v2.`);
+  console.error(`Nothing to capture (capture-mode=${captureMode}).`);
   process.exit(1);
 }
 
@@ -86,15 +79,13 @@ const shotsOut = doShots ? requireArg(args, "shots-out") : null;
 const isStage = Boolean(args["stage"]);
 const shotSuffix = isStage ? "_migrated" : "_prod";
 
-const selectorMap = mode === "v1" ? readJson(requireArg(args, "selector-map")) : null;
-
 let urlIndexMap = null;
 let rebaseRules = null;
 let bodyOnly = true;
 // Renderings deliberately out of scope (TEST_EXCLUDE_COMPONENTS): resolved and masked out of
 // their ancestors, but never compared in their own right.
 let excludedComponents = new Set();
-if (mode === "v2") {
+{
   const presentationRoot = requireArg(args, "presentation-root");
   const itemRoot =
     typeof args["item-root"] === "string" && args["item-root"].trim()
@@ -584,7 +575,7 @@ async function capturePage(context, pagePath, statusOnly) {
     }
 
     // Wait (softly) until the scope selector exists, so SPA hydration is done.
-    const scopeWait = mode === "v1" ? selectorMap.scopeSelectors.join(", ") : "#wrapper, main";
+    const scopeWait = "#wrapper, main";
     await page.waitForSelector(scopeWait, { timeout: 15000 }).catch(() => {});
 
     // One end-to-end scroll to trigger lazy loaders, then back to top.
@@ -620,23 +611,7 @@ async function capturePage(context, pagePath, statusOnly) {
       await removeOverlayElements(page, overlaySelectors);
     }
 
-    if (mode === "v2") return await captureV2(page, pagePath, rec, quiescer);
-
-    // ---- V1 (content only) ----
-    const texts = await page.evaluate(collectElementTexts, {
-      scopeSelectors: selectorMap.scopeSelectors,
-      items: selectorMap.items,
-      minHeight: selectorMap.minHeight,
-      removeBeforeCapture: selectorMap.removeBeforeCapture || selectorMap.removeBeforeScreenshot,
-    });
-    const pageDir = path.join(outDir, pathToSlugDir(pagePath));
-    fs.mkdirSync(pageDir, { recursive: true });
-    texts.forEach((text, i) => {
-      fs.writeFileSync(path.join(pageDir, `${String(i).padStart(2, "0")}.txt`), text, "utf8");
-    });
-    rec.elements = texts.length;
-    rec.textChars = texts.reduce((n, t) => n + normalizeText(t).length, 0);
-    return rec;
+    return await captureV2(page, pagePath, rec, quiescer);
   } finally {
     quiescer?.detach();
     await page.close();

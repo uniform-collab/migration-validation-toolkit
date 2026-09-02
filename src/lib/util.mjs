@@ -50,11 +50,9 @@ export function pathToSlugDir(pathname) {
 /**
  * Placeholder that replaces every media-asset URL before comparison.
  *
- * `extract.mjs` folds `<a href>` targets into the compared text as markdown
- * `[text](target)`, which is what makes link-only differences visible. Media
- * assets are the one link class where that backfires: prod and stage address
- * the SAME asset with structurally unrelated URLs, so they can never match and
- * every such link is a guaranteed false negative.
+ * Wherever an asset URL ends up in the compared text, prod and stage address the
+ * SAME asset with structurally unrelated URLs, so the two can never match and
+ * every such occurrence is a guaranteed false negative.
  *
  *   prod (Sitecore) : /-/media/files/public-policy/cha_meb_flyer.pdf
  *   stage (Uniform) : https://canary-img.uniform.global/p/<id>-cha_meb_flyer.pdf
@@ -103,16 +101,6 @@ export function readJson(file) {
 export function writeJson(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
-}
-
-/** Read a dataset page dir's element texts, ordered by the NN.txt index (V1). */
-export function readElementTexts(pageDir) {
-  if (!fs.existsSync(pageDir)) return [];
-  return fs
-    .readdirSync(pageDir)
-    .filter((f) => /^\d+\.txt$/.test(f))
-    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-    .map((f) => fs.readFileSync(path.join(pageDir, f), "utf8"));
 }
 
 /**

@@ -58,12 +58,12 @@ the point — `full` mode does not load every page twice.
 # expected side (legacy), page list from a sitemap
 migration-validate capture --base-url https://legacy.example.com \
   --sitemap https://legacy.example.com/sitemap.xml \
-  --out ./expected-v2 --mode v2 --presentation-root <presentation>/en
+  --out ./expected-v2 --presentation-root <presentation>/en
 
 # actual side (migrated), page list from the expected manifest
 migration-validate capture --base-url https://stage.example.com \
   --paths ./expected-v2/manifest.json --stage \
-  --out ./actual-v2 --mode v2 --presentation-root <presentation>/en
+  --out ./actual-v2 --presentation-root <presentation>/en
 ```
 
 | flag | meaning |
@@ -75,15 +75,13 @@ migration-validate capture --base-url https://stage.example.com \
 | `--pages-from-dir <dir>` / `--page-marker <file>` | Page list from a static mirror's `public/` tree — the files are the authority on what it can serve. |
 | `--paths <manifest.json>` | Page list from an existing manifest — how the actual side is pinned to exactly the expected side's pages. |
 | `--stage` | This is the migrated side (names shots `_migrated`, enables status-only parity probes). |
-| `--capture-mode content\|screenshots\|full` | What to record. Default `content`. Screenshots are V2-only. |
-| `--mode v1\|v2` | Component model. See *V2: selector-driven comparison*. |
-| `--selector-map <file>` | V1 only: the hand-authored component map. |
-| `--presentation-root <dir>` | V2: root of the per-page `index.json` presentation tree. |
-| `--items-root <dir>` | V2: item export whose `Slug` supplies each page's real URL. **Strongly recommended** — see *Where a page URL comes from*. |
-| `--item-root <path>` | V2: override the auto-detected tree root item path. |
-| `--rebase <json>` | V2: `[{from,to}]` selector-prefix rewrites (legacy positional selectors). |
-| `--body-only false` | V2: include header/footer/analytics instead of main content only. |
-| `--exclude-components <names>` | V2: rendering names resolved and masked, but never compared. |
+| `--capture-mode content\|screenshots\|full` | What to record. Default `content`. |
+| `--presentation-root <dir>` | **required.** Root of the per-page `index.json` presentation tree — the component model. |
+| `--items-root <dir>` | Item export whose `Slug` supplies each page's real URL. **Strongly recommended** — see *Where a page URL comes from*. |
+| `--item-root <path>` | Override the auto-detected tree root item path. |
+| `--rebase <json>` | `[{from,to}]` selector-prefix rewrites (legacy positional selectors). |
+| `--body-only false` | Include header/footer/analytics instead of main content only. |
+| `--exclude-components <names>` | Rendering names resolved and masked, but never compared. |
 | `--include /a,/b` | Allowlist of paths the migrated frontend covers so far (exact or `*` glob). Empty = the whole page list. See *Scoping a partially-built frontend*. |
 | `--concurrency <n>` | Parallel browser contexts. |
 | `--limit <n>` | Smoke mode: first N pages only. |
@@ -105,14 +103,13 @@ migration-validate capture --base-url https://stage.example.com \
 
 ```bash
 migration-validate compare --expected ./expected-v2 --actual ./actual-v2 \
-  --report-dir ./tests --mode v2 [--fail-under 95] [--exclude /404,/search]
+  --report-dir ./tests [--fail-under 95] [--exclude /404,/search]
 ```
 
 | flag | meaning |
 |---|---|
 | `--expected <dir>` / `--actual <dir>` | **required.** The two content datasets. |
 | `--report-dir <dir>` | **required.** Where `report.md` / `report.json` (and, in V2, `report-components.md`/`.json`) are written. |
-| `--mode v2` | Score V2 datasets (componentKey pairing) instead of V1 (DOM order). |
 | `--fail-under <n>` | Exit 1 when the overall score is below N. Omit to report only. |
 | `--exclude /a,/b` | Paths deliberately not migrated: listed, not scored. |
 | `--include /a,/b` | Allowlist of paths the frontend covers so far: everything else is out of scope entirely. Empty = whole site. |
@@ -168,22 +165,18 @@ literally.
 
 ---
 
-## V2: selector-driven comparison
+## The component model
 
-V1 partitions every page with one hand-authored `selector-map.json`. **V2** instead derives each
-page's components from the migration's **per-page `index.json`**: it walks the presentation tree,
-captures every rendering that has a `CssSelector`, and **masks descendant components** so a parent
-is compared without the children captured separately. It is an **either/or** switch — a run is V1
-*or* V2, never both — so the two never share datasets.
+A page is not compared as one blob of text: it is partitioned into the **renderings** the migration
+knows about. That partition comes from the migration's **per-page `index.json`** — the capture walks
+the presentation tree, captures every rendering that has a `CssSelector`, and **masks descendant
+components** so a parent is compared without the children captured separately.
 
-| | V1 | V2 |
-|---|---|---|
-| component source | `selector-map.json` (one map, all pages) | per-page `index.json` CssSelectors |
-| pairing | DOM order (Needleman–Wunsch) | **stable componentKey** (order-independent; the report names the rendering) |
-| dataset files | `<slug>/NN.txt` | `<slug>/<componentKey>.txt` + `<slug>/.components.json` |
-| screenshots | not supported | supported |
+That gives each component a **stable `componentKey`**, which is what pairs the two sides: pairing is
+order-independent, and the report names the rendering rather than a positional index. On disk a page
+is `<slug>/<componentKey>.txt` plus a `<slug>/.components.json` listing the order and names.
 
-### How a V2 target resolves to an element
+### How a target resolves to an element
 
 A rendering's target is **three** fields from `index.json`, not just the selector:
 
@@ -280,30 +273,17 @@ statement about frontend coverage.
 
 ---
 
-## Element extraction (V1)
+## Element filters
 
-Driven by `--selector-map`:
-
-- `scopeSelectors` — tried in order; the first `document.querySelector` hit is the capture root
-  (e.g. `main #content`, then `main`) — i.e. everything between header and footer.
-- `items` — `querySelectorAll` with a component selector list, or `directChildren` of the scope.
-- `removeBeforeCapture` — nodes removed first (cookie banners and the like).
-- Per-element filters, evaluated in-page: skip `position:fixed`, skip invisible
-  (`display:none`/`visibility:hidden`), skip below `minHeight` (default 30px), skip elements whose
-  normalized innerText is empty, and when `querySelectorAll` matches nested elements keep only the
-  outermost.
+A resolved target is still dropped from the comparison when it has nothing to compare: elements that
+are invisible (`display:none` / `visibility:hidden`), below `--min-height` (default 30px), or whose
+normalized innerText is empty. `--remove-before` strips nodes from the page first (cookie banners
+and the like), and `--max-height` caps an oversized capture.
 
 > A **zero-height** container is not invisible. A wrapper whose children are all floated collapses
 > to `808x0` while still rendering their text, so the visibility filter falls back to "has non-empty
 > innerText" when the rect is zero. A zero rect is the right test for a *screenshot* (no pixels to
 > grab — the screenshot path keeps its minimum) and the wrong one for *innerText*.
-
-innerText is extracted from an off-screen **clone** with synthetic spaces inserted between adjacent
-inline elements (`</span><span>`), so the extraction is non-destructive and stable across markup
-that differs only in inline nesting. On that same clone every `<a href>` is rewritten to markdown
-`[text](target)` so link targets are part of the compared text (plain innerText drops `href` and
-hides link-only differences); same-origin targets are reduced to an origin-relative path so the two
-hosts do not diff on every internal link, while cross-origin links keep their full URL.
 
 During capture, images/media/fonts are network-blocked in `content` mode (text-only comparison, a
 large speed win), the page is scrolled once end-to-end to trigger lazy loaders, and navigation waits
@@ -314,9 +294,7 @@ for `load` + the scope selector + a short settle. Page status is taken from a di
 
 ## Scoring (content)
 
-Per element pair — in V2 paired by `componentKey`, in V1 by order-preserving sequence alignment
-(Needleman–Wunsch maximizing total score, gap = 0, so one missing/inserted element costs exactly one
-gap instead of cascading a mismatch onto every later index):
+Per element pair, paired by `componentKey`:
 
 ```
 score = 100 * LCS(prodText, stageText).length / max(prodText.length, stageText.length)
@@ -324,15 +302,16 @@ score = 100 * LCS(prodText, stageText).length / max(prodText.length, stageText.l
 
 - Texts are whitespace-normalized first (`\s+` → single space, trimmed).
 - **Media-asset URLs are masked** to `asset-links-are-hidden-in-e2e` on both sides
-  (`src/lib/util.mjs`). The markdown link annotation puts `href` targets into the compared text, and
-  the two sites address the *same* asset with structurally unrelated URLs — a CMS media path, a DAM
-  CDN URL, a role-gated proxy path whose token varies per render — so those links could never match
-  and were pure false negatives (~600 links on a real dataset; masking moved the overall score
-  +8 points across 276 pages with 0 regressions). The link **text** is still scored, so a missing or
-  renamed document still diffs. Unresolved asset **placeholders** are deliberately *not* masked:
-  they mean the asset was never resolved to a real URL — a genuine migration defect that must keep
-  showing as a diff. Masking happens at comparison time, not in the capture, so it applies to an
-  already-frozen dataset with no re-capture and the datasets keep real URLs for debugging.
+  (`src/lib/util.mjs`). Wherever an asset URL reaches the compared text, the two sites address the
+  *same* asset with structurally unrelated URLs — a CMS media path, a DAM CDN URL, a role-gated
+  proxy path whose token varies per render — so it could never match and is a guaranteed false
+  negative. Unresolved asset **placeholders** are deliberately *not* masked: they mean the asset was
+  never resolved to a real URL — a genuine migration defect that must keep showing as a diff.
+  Masking happens at comparison time, not in the capture, so it applies to an already-frozen dataset
+  with no re-capture and the datasets keep real URLs for debugging.
+  (innerText normally drops `href`, so on a component-partitioned dataset this rule only fires when
+  a URL is *visible text*. It is a safety net, not a routine correction — measured 0 occurrences on
+  the current CHA dataset.)
 - LCS = longest common **substring**, via a suffix automaton (O(n+m)); the naive DP is O(n·m) and
   too slow for ~10k element pairs.
 - Both sides empty → 100. An element present on one side only scores 0, tagged `missing-on-stage` /
@@ -372,7 +351,7 @@ absent — regressions) and **gone diffs** (were < 100, now 100 or gone — fixe
 keyed by `page + element`, i.e. "same slot on the same page". First-ever run prints a baseline note.
 
 **Component-scoped report** (`report-components.md`/`.json`, V2 only — component names are
-meaningless in V1) regroups the *same* scored data by rendering **name** instead of by page:
+regroups the *same* scored data by rendering **name** instead of by page:
 
 1. **Component average scores, worst first** — each component's mean score across the pages it
    appears on, plus **worst (0)** and **perfect (100)** counts out of N. `Promo Card | 93.4 | 12/465
@@ -582,7 +561,7 @@ the viewer shows that run's screenshots as long as its directory is still on dis
 <expected dir>/            # captured once from the legacy site; commit this
   manifest.json            # { pages: { "/path": { status, elements, finalUrl? } } }
   sitemap.xml              # copy of the page list the dataset was built from
-  <page_slug>/<key>.txt    # raw innerText per component (V1: NN.txt in DOM order)
+  <page_slug>/<key>.txt    # raw innerText per component
   <page_slug>/.components.json   # V2: componentKey -> rendering name/uid
 
 <actual dir>/              # rebuilt every run from the migrated site
@@ -615,10 +594,10 @@ typically from its own `.env` — and calls the bin, exactly as it would call an
 migration-validate install-browsers
 
 $captureArgs = @('capture', '--base-url', $prodUrl, '--sitemap', $sitemapUrl,
-                 '--out', $expectedDir, '--mode', 'v2', '--presentation-root', $presentationRoot)
+                 '--out', $expectedDir, '--presentation-root', $presentationRoot)
 migration-validate @captureArgs
 
-migration-validate compare --expected $expectedDir --actual $actualDir --report-dir $reportDir --mode v2
+migration-validate compare --expected $expectedDir --actual $actualDir --report-dir $reportDir
 ```
 
 A worked example — one stage per step, with the environment plumbing, the frontend build, per-run
@@ -640,8 +619,7 @@ src/capture.mjs               # dataset capture — both sides use the same code
 src/compare.mjs               # content scoring + report
 src/compare-screenshots.mjs   # pixel diff + report
 src/md-to-pdf.mjs             # Markdown -> PDF via the bundled Chromium
-src/lib/extract.mjs           # V1 in-page element collection + innerText extraction
-src/lib/extract-selectors.mjs # V2 in-page component resolution + masking
+src/lib/extract-selectors.mjs # in-page component resolution + masking
 src/lib/index-json.mjs        # index.json contract, URL join, componentKey assignment
 src/lib/screenshot.mjs        # idle/stability gates, tile+stitch capture
 src/lib/pixdiff.mjs           # size-tolerant intersection diff  (+ pixdiff.test.mjs)
