@@ -6,8 +6,11 @@
  *
  * Masking is text-only and non-destructive: each target's element is cloned,
  * the clone's descendant component subtrees are removed, then innerText is read
- * from the clone (the same off-screen-clone + inline-space technique as the V1
- * extractor). No DOM restore is needed, so target order doesn't matter.
+ * from the clone. No DOM restore is needed, so target order doesn't matter.
+ *
+ * Before innerText is read, each clone's <a href> links are rewritten in place to
+ * markdown "[text](target)", so link targets are part of the compared text - plain
+ * innerText drops href entirely and hides link-only differences.
  *
  * @param cfg { targets: [{ order:number, key:string, name:string, sel:string,
  *                          index?:number, levelsUp?:number }] }
@@ -127,6 +130,52 @@ export function collectComponentTexts(cfg) {
     for (const [parent, nxt] of pending) parent.insertBefore(document.createTextNode(" "), nxt);
   }
 
+  // Rewrite every <a href> in the clone to markdown "[text](target)" so the link
+  // target rides along in innerText (plain innerText drops href entirely, hiding
+  // link-only differences from the comparison). The target is normalized to an
+  // origin-relative path for same-origin links, so prod and stage — served from
+  // different domains — don't diff on every internal link; cross-origin links keep
+  // their full URL (identical on both sides).
+  //
+  // Media-asset URLs would still differ (a CMS media path vs a DAM CDN URL for the
+  // SAME file), so they are masked out at COMPARISON time — see normalizeText in
+  // lib/util.mjs. That masking only has anything to mask because of this rewrite.
+  function annotateLinksMarkdown(root) {
+    const anchors =
+      root.nodeType === 1 && root.tagName === "A" && root.hasAttribute("href")
+        ? [root, ...root.querySelectorAll("a[href]")]
+        : [...root.querySelectorAll("a[href]")];
+    for (const a of anchors) {
+      const raw = a.getAttribute("href");
+      if (raw == null || !raw.trim()) continue;
+      let target = raw.trim();
+      try {
+        const u = new URL(target, document.baseURI);
+        target =
+          u.origin === location.origin
+            ? (u.pathname.replace(/\/+$/, "") || "/") + u.search + u.hash
+            : u.href;
+      } catch {
+        // Unparseable href (e.g. "javascript:…") — keep the raw attribute value.
+      }
+      // The target goes in a text-transform:none span, NOT a bare text node.
+      // innerText applies the anchor's computed text-transform to whatever is
+      // inside it, so an uppercasing link (`text-transform:uppercase`, very common
+      // on CTAs) would emit "[LEARN MORE](/ABOUT-CHA)" — a mangled target that also
+      // stops the media-URL mask in normalizeText from matching `/-/media/`. The
+      // link TEXT is deliberately left transformed: that is visible content, and a
+      // casing difference between prod and stage is a real diff worth scoring.
+      const open = document.createElement("span");
+      open.style.textTransform = "none";
+      open.textContent = "[";
+      const close = document.createElement("span");
+      close.style.textTransform = "none";
+      close.textContent = "](" + target + ")";
+      a.insertBefore(open, a.firstChild);
+      a.appendChild(close);
+    }
+  }
+
   // Clone the element, remove descendant component subtrees (top-most marked
   // descendants — removing an ancestor drops its nested components too), then
   // read innerText from an off-screen clone.
@@ -148,6 +197,10 @@ export function collectComponentTexts(cfg) {
     try {
       // Attached first: the space insertion is now a geometry test and needs real rects.
       insertSpacesBetweenAdjacentInlineElements(clone);
+      // STRICTLY AFTER the geometry pass: this lengthens every link's text, which
+      // would move the rects the space insertion measures and silently change where
+      // synthetic spaces land. It is purely structural, so it is safe here.
+      annotateLinksMarkdown(clone);
       return clone.innerText ?? "";
     } finally {
       host.remove();

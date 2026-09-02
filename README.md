@@ -285,6 +285,28 @@ and the like), and `--max-height` caps an oversized capture.
 > innerText" when the rect is zero. A zero rect is the right test for a *screenshot* (no pixels to
 > grab — the screenshot path keeps its minimum) and the wrong one for *innerText*.
 
+### Links are folded into the text
+
+Plain `innerText` drops `href` entirely, so a link pointing at the wrong page reads as a perfect
+match. Before the text is read, every `<a href>` in the (cloned) component is rewritten in place to
+markdown **`[text](target)`**, which puts the target into the compared string.
+
+- **Same-origin targets are reduced to an origin-relative path**, so the two sides — served from
+  different hosts — do not diff on every internal link. Cross-origin links keep their full URL,
+  which is identical on both sides anyway.
+- **The target is emitted verbatim; the link text is not.** The inserted markup sits in a
+  `text-transform:none` span, because `innerText` applies the anchor's computed `text-transform` to
+  whatever is inside it — an uppercasing CTA would otherwise yield `[LEARN MORE](/ABOUT-CHA)`, a
+  mangled target that also stops the media-URL mask below from matching. The link *text* stays
+  transformed on purpose: that is visible content, and a casing difference between the two sides is
+  a real diff worth scoring.
+- It runs **after** the geometry-driven inline-space pass, which measures real rects: lengthening
+  every link first would move those rects and silently change where synthetic spaces land.
+
+> **This is part of the dataset contract.** Turning it on or off changes every captured component
+> that contains a link, so the expected side must be re-captured to match — see *Both sides must be
+> captured under identical rules* under Development.
+
 During capture, images/media/fonts are network-blocked in `content` mode (text-only comparison, a
 large speed win), the page is scrolled once end-to-end to trigger lazy loaders, and navigation waits
 for `load` + the scope selector + a short settle. Page status is taken from a direct HTTP request
@@ -302,16 +324,14 @@ score = 100 * LCS(prodText, stageText).length / max(prodText.length, stageText.l
 
 - Texts are whitespace-normalized first (`\s+` → single space, trimmed).
 - **Media-asset URLs are masked** to `asset-links-are-hidden-in-e2e` on both sides
-  (`src/lib/util.mjs`). Wherever an asset URL reaches the compared text, the two sites address the
-  *same* asset with structurally unrelated URLs — a CMS media path, a DAM CDN URL, a role-gated
-  proxy path whose token varies per render — so it could never match and is a guaranteed false
-  negative. Unresolved asset **placeholders** are deliberately *not* masked: they mean the asset was
-  never resolved to a real URL — a genuine migration defect that must keep showing as a diff.
-  Masking happens at comparison time, not in the capture, so it applies to an already-frozen dataset
-  with no re-capture and the datasets keep real URLs for debugging.
-  (innerText normally drops `href`, so on a component-partitioned dataset this rule only fires when
-  a URL is *visible text*. It is a safety net, not a routine correction — measured 0 occurrences on
-  the current CHA dataset.)
+  (`src/lib/util.mjs`). The link annotation above puts `href` targets into the compared text, and
+  the two sites address the *same* asset with structurally unrelated URLs — a CMS media path, a DAM
+  CDN URL, a role-gated proxy path whose token varies per render — so those links could never match
+  and are pure false negatives. The link **text** is still scored, so a missing or renamed document
+  still diffs. Unresolved asset **placeholders** are deliberately *not* masked: they mean the asset
+  was never resolved to a real URL — a genuine migration defect that must keep showing as a diff.
+  Masking happens at comparison time, not in the capture, so it applies to an already-captured
+  dataset with no re-capture and the datasets keep real URLs for debugging.
 - LCS = longest common **substring**, via a suffix automaton (O(n+m)); the naive DP is O(n·m) and
   too slow for ~10k element pairs.
 - Both sides empty → 100. An element present on one side only scores 0, tagged `missing-on-stage` /
