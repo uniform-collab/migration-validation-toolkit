@@ -58,12 +58,12 @@ the point — `full` mode does not load every page twice.
 # expected side (legacy), page list from a sitemap
 migration-validate capture --base-url https://legacy.example.com \
   --sitemap https://legacy.example.com/sitemap.xml \
-  --out ./expected-v2 --mode v2 --index-root <presentation>/en
+  --out ./expected-v2 --mode v2 --presentation-root <presentation>/en
 
 # actual side (migrated), page list from the expected manifest
 migration-validate capture --base-url https://stage.example.com \
   --paths ./expected-v2/manifest.json --stage \
-  --out ./actual-v2 --mode v2 --index-root <presentation>/en
+  --out ./actual-v2 --mode v2 --presentation-root <presentation>/en
 ```
 
 | flag | meaning |
@@ -78,7 +78,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--capture-mode content\|screenshots\|full` | What to record. Default `content`. Screenshots are V2-only. |
 | `--mode v1\|v2` | Component model. See *V2: selector-driven comparison*. |
 | `--selector-map <file>` | V1 only: the hand-authored component map. |
-| `--index-root <dir>` | V2: root of the per-page `index.json` tree. |
+| `--presentation-root <dir>` | V2: root of the per-page `index.json` presentation tree. |
 | `--items-root <dir>` | V2: item export whose `Slug` supplies each page's real URL. **Strongly recommended** — see *Where a page URL comes from*. |
 | `--item-root <path>` | V2: override the auto-detected tree root item path. |
 | `--rebase <json>` | V2: `[{from,to}]` selector-prefix rewrites (legacy positional selectors). |
@@ -615,7 +615,7 @@ typically from its own `.env` — and calls the bin, exactly as it would call an
 migration-validate install-browsers
 
 $captureArgs = @('capture', '--base-url', $prodUrl, '--sitemap', $sitemapUrl,
-                 '--out', $expectedDir, '--mode', 'v2', '--index-root', $indexRoot)
+                 '--out', $expectedDir, '--mode', 'v2', '--presentation-root', $presentationRoot)
 migration-validate @captureArgs
 
 migration-validate compare --expected $expectedDir --actual $actualDir --report-dir $reportDir --mode v2

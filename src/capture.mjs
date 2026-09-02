@@ -95,7 +95,7 @@ let bodyOnly = true;
 // their ancestors, but never compared in their own right.
 let excludedComponents = new Set();
 if (mode === "v2") {
-  const indexRoot = requireArg(args, "index-root");
+  const presentationRoot = requireArg(args, "presentation-root");
   const itemRoot =
     typeof args["item-root"] === "string" && args["item-root"].trim()
       ? args["item-root"].trim()
@@ -110,11 +110,11 @@ if (mode === "v2") {
     typeof args["items-root"] === "string" && args["items-root"].trim()
       ? args["items-root"].trim()
       : undefined;
-  const built = buildUrlToIndexMap(indexRoot, itemRoot, itemsRoot);
+  const built = buildUrlToIndexMap(presentationRoot, itemRoot, itemsRoot);
   urlIndexMap = built.map;
   const st = built.stats || {};
   console.log(
-    `V2 selector mode: indexed ${built.files.length} index.json under ${indexRoot} ` +
+    `V2 selector mode: indexed ${built.files.length} index.json under ${presentationRoot} ` +
       `(root ItemPath ${built.rootItemPath}); ${urlIndexMap.size} URLs; body-only=${bodyOnly}.`
   );
   console.log(
