@@ -54,9 +54,10 @@ export function pathToSlugDir(pathname) {
  * SAME asset with structurally unrelated URLs, so the two can never match and
  * every such occurrence is a guaranteed false negative.
  *
- *   prod (Sitecore) : /-/media/files/public-policy/cha_meb_flyer.pdf
- *   stage (Uniform) : https://canary-img.uniform.global/p/<id>-cha_meb_flyer.pdf
- *   stage (gated)   : /_protected-media/<per-render token>/<id>-cha_meb_flyer.pdf
+ *   prod (Sitecore)   : /-/media/files/public-policy/cha_meb_flyer.pdf
+ *   stage (Uniform)   : https://canary-files.uniform.global/p/<id>-cha_meb_flyer.pdf
+ *   stage (gated)     : /_protected-media/<per-render token>/<id>-cha_meb_flyer.pdf
+ *   stage (local edge): http://127.0.0.1:<port>/media/files.uniform.global/p/<id>-cha_meb_flyer.pdf
  *
  * Collapsing all of them to one placeholder keeps the surrounding link TEXT
  * scored (a missing or renamed document still diffs) while dropping the
@@ -68,13 +69,31 @@ export function pathToSlugDir(pathname) {
  */
 export const ASSET_LINK_PLACEHOLDER = "asset-links-are-hidden-in-e2e";
 
-// Sitecore media paths (`/-/media/…`, `/-/jssmedia/…`), Uniform asset URLs
-// (`https://*img.uniform.global/…`, incl. protocol-relative) and the frontend's
-// role-gated media proxy (`/_protected-media/…`), each optionally host-prefixed
-// because cross-origin links keep their absolute form. The target stops at
-// whitespace or `)` so the markdown wrapper `[text](…)` survives intact.
-const ASSET_LINK_URL =
-  /(?:(?:https?:)?\/\/[^\s)/]*img\.uniform\.global\/[^\s)]*)|(?:(?:https?:)?\/\/[^\s)/]+)?\/(?:-\/(?:jss?)?media|_protected-media)\/[^\s)]*/gi;
+// Four shapes, each optionally host-prefixed because cross-origin links keep their
+// absolute form. The target stops at whitespace or `)` so the markdown wrapper
+// `[text](…)` survives intact.
+//
+//  1. uniform-local-edge's media proxy: `/media/<asset host>/…`. The asset host is a
+//     PATH SEGMENT here, not the URL host - the URL host is 127.0.0.1 on a RANDOM port,
+//     which is also why this MUST be masked: the port changes every run, so an unmasked
+//     link diffs against itself between two stage captures, never mind against prod.
+//  2. Uniform asset hosts directly (`https://canary-files.uniform.global/…`, incl.
+//     protocol-relative). Both `img.` and `files.` - `files.` is the common one
+//     (documents), and matching only `img.` left every PDF link unmasked.
+//  3. Sitecore media paths (`/-/media/…`, `/-/jssmedia/…`).
+//  4. The frontend's role-gated media proxy (`/_protected-media/…`).
+const ASSET_LINK_URL = new RegExp(
+  [
+    // 1. local-edge proxy - the `/media/` prefix is what proves it is the media route,
+    //    so the upstream host segment is matched loosely.
+    String.raw`(?:(?:https?:)?//[^\s)/]+)?/media/[^\s)/]*uniform\.global/[^\s)]*`,
+    // 2. Uniform asset hosts
+    String.raw`(?:https?:)?//[^\s)/]*(?:img|files)\.uniform\.global/[^\s)]*`,
+    // 3 + 4. Sitecore media paths and the gated proxy
+    String.raw`(?:(?:https?:)?//[^\s)/]+)?/(?:-/(?:jss?)?media|_protected-media)/[^\s)]*`,
+  ].join("|"),
+  "gi"
+);
 
 /**
  * Whitespace-insensitive normalization used for all comparisons, with
