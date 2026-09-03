@@ -103,10 +103,18 @@ const ASSET_LINK_URL = new RegExp(
  * `expected/` is a frozen one-time dataset, so a capture-side rewrite would
  * only ever mask the stage side. This way both sides collapse identically and
  * the datasets keep the real URLs on disk for debugging.
+ *
+ * It also trims whitespace out of the LINK ANNOTATION's own brackets. The capture
+ * inserts `[` before the anchor's first child and `](target)` after its last, so any
+ * whitespace the markup keeps inside the <a> lands INSIDE the brackets: one side emits
+ * `[ Read more ](/x)` and the other `[Read more](/x)` for the same link. That is a
+ * difference in the annotation, not in the content, and it is common enough to matter
+ * (9335 of 26864 prod links vs 7254 of 26586 stage ones on the CHA dataset).
  */
 export function normalizeText(raw) {
   return String(raw ?? "")
     .replace(/\s+/g, " ")
+    .replace(/\[ ?([^\]]*?) ?\]\(/g, "[$1](")
     .replace(ASSET_LINK_URL, ASSET_LINK_PLACEHOLDER)
     .trim();
 }

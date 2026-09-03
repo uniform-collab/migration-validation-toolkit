@@ -82,3 +82,28 @@ test("masks every occurrence in one string, and collapses whitespace", () => {
     `[a](${P}) [b](${P})`
   );
 });
+
+/**
+ * The annotation's own brackets. `[` goes before the anchor's first child and
+ * `](target)` after its last, so whitespace the markup keeps inside the <a> lands
+ * inside the brackets — a difference in the annotation, not in the content.
+ */
+test("trims whitespace out of the annotation's brackets, on either side", () => {
+  const clean = "[Read more](/x)";
+  assert.equal(normalizeText("[ Read more ](/x)"), clean);
+  assert.equal(normalizeText("[Read more ](/x)"), clean);
+  assert.equal(normalizeText("[ Read more](/x)"), clean);
+  assert.equal(normalizeText("[\n  Read more\n](/x)"), clean);
+  assert.equal(normalizeText(clean), clean);
+});
+
+test("an icon link (whitespace-only text) collapses the same on both sides", () => {
+  assert.equal(normalizeText("[ ](/x)"), "[](/x)");
+  assert.equal(normalizeText("[](/x)"), "[](/x)");
+});
+
+test("bracket trimming does not touch inner spacing or non-annotation brackets", () => {
+  assert.equal(normalizeText("[Read  more](/x)"), "[Read more](/x)");
+  // No `](` follows, so this is ordinary content and must be left alone.
+  assert.equal(normalizeText("see [ note 1 ] below"), "see [ note 1 ] below");
+});
