@@ -149,6 +149,13 @@ export function collectComponentTexts(cfg) {
       const raw = a.getAttribute("href");
       if (raw == null || !raw.trim()) continue;
       let target = raw.trim();
+      // A bare `#` (or a javascript: href) is a JS HOOK, not a destination: legacy uses
+      // `<a href="#" class="view_on_demand" data-video-id=…>` to open a modal, where a
+      // modern frontend uses <button>. Resolving `#` against baseURI would invent a
+      // target - the current page's own path - and diff it against the other side's
+      // button, which carries no annotation at all. A real in-page anchor (`#section`)
+      // still annotates; only the empty fragment is a hook.
+      if (target === "#" || /^javascript:/i.test(target)) continue;
       try {
         const u = new URL(target, document.baseURI);
         target =
