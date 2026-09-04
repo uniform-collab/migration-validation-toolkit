@@ -90,7 +90,12 @@ const ASSET_LINK_URL = new RegExp(
     // 2. Uniform asset hosts
     String.raw`(?:https?:)?//[^\s)/]*(?:img|files)\.uniform\.global/[^\s)]*`,
     // 3 + 4. Sitecore media paths and the gated proxy
-    String.raw`(?:(?:https?:)?//[^\s)/]+)?/(?:-/(?:jss?)?media|_protected-media)/[^\s)]*`,
+    //    Sitecore emits `-/media/…` PAGE-RELATIVE, so prod serves
+    //    `/education/events/-/media/files/x.pdf` - those leading segments are the PAGE, not the
+    //    asset. Without consuming them the mask leaves `/education/events` in front of the
+    //    placeholder while the stage side (an absolute asset URL) masks whole, and the same file
+    //    collapses to two different strings.
+    String.raw`(?:(?:https?:)?//[^\s)/]+)?(?:/[^\s)/]+)*?/(?:-/(?:jss?)?media|_protected-media)/[^\s)]*`,
   ].join("|"),
   "gi"
 );

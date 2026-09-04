@@ -48,6 +48,26 @@ test("does NOT mask an unresolved /uniform_asset/ placeholder", () => {
   assert.equal(normalizeText(raw), raw);
 });
 
+test("masks a PAGE-RELATIVE Sitecore media path, prefix included", () => {
+  // Sitecore emits `-/media/…` relative to the current page, so prod serves the asset as
+  // /education/events/-/media/… - the browser resolves it against the page. Those leading
+  // segments are the page, not the asset: leaving them in front of the placeholder made the
+  // same file collapse to `(/education/eventsasset-links-are-hidden-in-e2e)` on prod and to
+  // `(asset-links-are-hidden-in-e2e)` on the stage, a guaranteed diff from masking alone.
+  assert.equal(
+    normalizeText(link("/education/events/-/media/files/events/cloudcme-instructions.pdf")),
+    masked
+  );
+  assert.equal(normalizeText(link("/a/-/jssmedia/images/x.jpg")), masked);
+  assert.equal(normalizeText(link("/a/b/c/_protected-media/token/id-x.pdf")), masked);
+  // still masks whole when there is no prefix, and when the host is present
+  assert.equal(normalizeText(link("/-/media/files/x.pdf")), masked);
+  assert.equal(
+    normalizeText(link("https://www.childrenshospitals.org/education/events/-/media/files/x.pdf")),
+    masked
+  );
+});
+
 test("does NOT mask non-asset URLs", () => {
   for (const url of [
     "https://www.childrenshospitals.org/news/some-article",
