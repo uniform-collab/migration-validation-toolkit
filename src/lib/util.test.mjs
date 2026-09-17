@@ -68,6 +68,31 @@ test("masks a PAGE-RELATIVE Sitecore media path, prefix included", () => {
   );
 });
 
+test("masks a filename carrying a parenthesised suffix", () => {
+  // Sitecore's duplicate-upload convention appends `-(1)`, `(2)`, … to the file name, and a
+  // tail that stopped at the FIRST `)` masked only up to it: prod kept a literal `).xlsx`
+  // after the placeholder while the stage's Uniform URL (parens stripped) masked whole —
+  // a guaranteed diff on an asset that migrated correctly.
+  assert.equal(
+    normalizeText(link("/-/media/files/migration/cha_demonstrating_value_menu-(1).xlsx")),
+    masked
+  );
+  assert.equal(normalizeText(link("/-/media/files/x-(2).pdf")), masked);
+  assert.equal(normalizeText(link("https://files.uniform.global/p/ab-cha_menu-(1).xlsx")), masked);
+  assert.equal(
+    normalizeText(link("http://127.0.0.1:55632/media/files.uniform.global/p/ab-x-(1).pdf")),
+    masked
+  );
+  // An UNCLOSED paren still ends the URL where it always did — the trailing `)` is read as
+  // the annotation's, not as closing the name, because no URL follows it.
+  assert.equal(normalizeText(link("/-/media/files/x-(1.pdf")), masked);
+  // The annotation's own `)` is never swallowed: text after the link survives.
+  assert.equal(
+    normalizeText("[Menu](/-/media/files/menu-(1).xlsx) and more text"),
+    `[Menu](${P}) and more text`
+  );
+});
+
 test("does NOT mask non-asset URLs", () => {
   for (const url of [
     "https://www.childrenshospitals.org/news/some-article",

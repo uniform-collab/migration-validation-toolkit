@@ -70,8 +70,8 @@ export function pathToSlugDir(pathname) {
 export const ASSET_LINK_PLACEHOLDER = "asset-links-are-hidden-in-e2e";
 
 // Four shapes, each optionally host-prefixed because cross-origin links keep their
-// absolute form. The target stops at whitespace or `)` so the markdown wrapper
-// `[text](…)` survives intact.
+// absolute form. The target stops at whitespace or an UNBALANCED `)` so the markdown
+// wrapper `[text](…)` survives intact.
 //
 //  1. uniform-local-edge's media proxy: `/media/<asset host>/…`. The asset host is a
 //     PATH SEGMENT here, not the URL host - the URL host is 127.0.0.1 on a RANDOM port,
@@ -82,20 +82,37 @@ export const ASSET_LINK_PLACEHOLDER = "asset-links-are-hidden-in-e2e";
 //     (documents), and matching only `img.` left every PDF link unmasked.
 //  3. Sitecore media paths (`/-/media/…`, `/-/jssmedia/…`).
 //  4. The frontend's role-gated media proxy (`/_protected-media/…`).
+// The URL tail. A plain `[^\s)]*` ends at the FIRST `)`, which truncates any asset whose
+// filename contains a parenthesised suffix - Sitecore's duplicate-upload convention emits
+// them by the dozen (`cha_..._measure_menu-(1).xlsx`). The prod side then masked only
+// `/-/media/…menu-(1` and kept a literal `).xlsx` after the placeholder, while the stage
+// side (a Uniform URL with the parens stripped) masked whole: a guaranteed diff on an
+// asset that migrated correctly - exactly the false negative masking exists to prevent.
+// So consume BALANCED `(…)` groups as part of the URL and stop only at an unbalanced `)`,
+// which is still what closes the `[text](…)` annotation the capture inserts.
+//
+// The lookahead is what disambiguates the two readings of `…x-(1).pdf)`: a `(…)` group is
+// only taken as part of the URL when MORE url follows it (`(1)` then `.xlsx`). A group that
+// would end the match is left to the bare-`(` branch instead, so `…/x-(1.pdf)` — an unclosed
+// paren in the name, where the final `)` is the annotation's — still ends exactly where it
+// always did. Only a URL genuinely ENDING in `)` stays ambiguous, and that resolves the old
+// way (the `)` is read as the annotation's).
+const URL_TAIL = String.raw`(?:\([^\s()]*\)(?=[^\s)])|[^\s)])*`;
 const ASSET_LINK_URL = new RegExp(
   [
     // 1. local-edge proxy - the `/media/` prefix is what proves it is the media route,
     //    so the upstream host segment is matched loosely.
-    String.raw`(?:(?:https?:)?//[^\s)/]+)?/media/[^\s)/]*uniform\.global/[^\s)]*`,
+    String.raw`(?:(?:https?:)?//[^\s)/]+)?/media/[^\s)/]*uniform\.global/` + URL_TAIL,
     // 2. Uniform asset hosts
-    String.raw`(?:https?:)?//[^\s)/]*(?:img|files)\.uniform\.global/[^\s)]*`,
+    String.raw`(?:https?:)?//[^\s)/]*(?:img|files)\.uniform\.global/` + URL_TAIL,
     // 3 + 4. Sitecore media paths and the gated proxy
     //    Sitecore emits `-/media/…` PAGE-RELATIVE, so prod serves
     //    `/education/events/-/media/files/x.pdf` - those leading segments are the PAGE, not the
     //    asset. Without consuming them the mask leaves `/education/events` in front of the
     //    placeholder while the stage side (an absolute asset URL) masks whole, and the same file
     //    collapses to two different strings.
-    String.raw`(?:(?:https?:)?//[^\s)/]+)?(?:/[^\s)/]+)*?/(?:-/(?:jss?)?media|_protected-media)/[^\s)]*`,
+    String.raw`(?:(?:https?:)?//[^\s)/]+)?(?:/[^\s)/]+)*?/(?:-/(?:jss?)?media|_protected-media)/` +
+      URL_TAIL,
   ].join("|"),
   "gi"
 );
