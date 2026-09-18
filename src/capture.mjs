@@ -265,8 +265,21 @@ async function getSitemapPaths(sitemapUrl) {
  * only 601 (80 of which have no prod.html at all). The files on disk are the authority on
  * what the mirror can actually serve, so scanning for the marker file covers 1296 of the
  * canvas's 1664 pages where the sitemap covers 516.
+ *
+ * `marker` picks the mirror's layout, because the two tools that produce one disagree:
+ *
+ *   prod.html   ONE FILE PER DIRECTORY, the directory named after the URL
+ *               (public/<path>/prod.html -> /<path>). The cha-prod-mirror shape.
+ *   *.html      ANY FILE WITH THAT EXTENSION, which is httrack's shape: <path>.html is
+ *               the page at /<path>, and <dir>/index.html is the page at /<dir>.
+ *               D:\wsp\prod-mirror is this one.
+ *
+ * Only the extension is read out of a `*.ext` marker — it is not a general glob.
  */
 function listPagesFromDir(rootDir, marker) {
+  // "*.html" -> extension mode; anything else stays an exact file name.
+  const extMatch = /^\*(\.[A-Za-z0-9]+)$/.exec(String(marker).trim());
+  const ext = extMatch ? extMatch[1].toLowerCase() : null;
   const out = [];
   const stack = [{ dir: rootDir, rel: "" }];
   while (stack.length) {
@@ -283,6 +296,12 @@ function listPagesFromDir(rootDir, marker) {
       if (e.isDirectory()) {
         if (e.name === "-" || e.name.startsWith("_")) continue;
         stack.push({ dir: path.join(dir, e.name), rel: `${rel}/${e.name}` });
+      } else if (ext) {
+        if (!e.name.toLowerCase().endsWith(ext)) continue;
+        const stem = e.name.slice(0, -ext.length);
+        // <dir>/index.html is the page AT <dir>; any other file is a page of its own.
+        if (stem.toLowerCase() === "index") out.push(rel === "" ? "/" : rel);
+        else out.push(`${rel}/${stem}`);
       } else if (e.name === marker) {
         out.push(rel === "" ? "/" : rel);
       }
@@ -291,11 +310,61 @@ function listPagesFromDir(rootDir, marker) {
   return [...new Set(out)].sort();
 }
 
+/**
+ * `--page-rewrite "/en-gl/=>/en-GL/,/fr-gl/=>/fr-GL/"`: prefix rewrites applied to a page list
+ * DERIVED from the legacy side (a mirror directory or a sitemap), never to `--paths`.
+ *
+ * The two sides can disagree on the spelling of a path they both serve. WSP's legacy URLs are
+ * lowercased by a Sitecore link provider, so the httrack mirror's tree is `en-gl/`, while the
+ * migrated frontend routes on the Uniform locale and answers `/en-GL/...`. One page list has to
+ * address both, and it is the locale segment that has to give: rewriting it here means every
+ * later stage — capture, manifest, compare, the report — carries ONE path per page.
+ *
+ * Comma-separated, `from=>to`, first matching rule wins, prefixes only. Comma because the CLI is
+ * reached through a .cmd shim on Windows, where a `|` in an argument is a pipe.
+ */
+function parsePageRewrites(value) {
+  if (!value || value === true) return [];
+  return String(value)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((rule) => {
+      const i = rule.indexOf("=>");
+      if (i < 0) {
+        console.error(`Bad --page-rewrite rule (expected "from=>to"): ${rule}`);
+        process.exit(1);
+      }
+      return { from: rule.slice(0, i).trim(), to: rule.slice(i + 2).trim() };
+    })
+    .filter((r) => r.from);
+}
+
+function applyPageRewrites(paths, rules) {
+  if (!rules.length) return paths;
+  let changed = 0;
+  const out = paths.map((p) => {
+    for (const r of rules) {
+      if (p.startsWith(r.from)) {
+        changed++;
+        return r.to + p.slice(r.from.length);
+      }
+    }
+    return p;
+  });
+  console.log(
+    `Page rewrites: ${changed}/${paths.length} paths rewritten by ` +
+      rules.map((r) => `${r.from}=>${r.to}`).join(", ")
+  );
+  return [...new Set(out)].sort();
+}
+
 async function getPathsToCapture() {
+  const rewrites = parsePageRewrites(args["page-rewrite"]);
   if (args["pages-from-dir"]) {
     const dir = String(args["pages-from-dir"]);
     const marker = String(args["page-marker"] || "prod.html");
-    const paths = listPagesFromDir(dir, marker);
+    const paths = applyPageRewrites(listPagesFromDir(dir, marker), rewrites);
     if (!paths.length) {
       console.error(`No "${marker}" files found under ${dir} — nothing to capture.`);
       process.exit(1);
@@ -305,14 +374,20 @@ async function getPathsToCapture() {
     for (const d of [outDir, shotsOut]) {
       if (d) {
         fs.mkdirSync(d, { recursive: true });
-        writeJson(path.join(d, "pages.json"), { source: dir, marker, count: paths.length, paths });
+        writeJson(path.join(d, "pages.json"), {
+          source: dir,
+          marker,
+          rewrites,
+          count: paths.length,
+          paths,
+        });
       }
     }
     console.log(`Page list: ${paths.length} pages from ${marker} files under ${dir}.`);
     return paths.map((p) => ({ path: p, prodStatus: null }));
   }
   if (args["sitemap"]) {
-    const paths = await getSitemapPaths(String(args["sitemap"]));
+    const paths = applyPageRewrites(await getSitemapPaths(String(args["sitemap"])), rewrites);
     return paths.map((p) => ({ path: p, prodStatus: null }));
   }
   if (args["paths"]) {

@@ -72,7 +72,8 @@ migration-validate capture --base-url https://stage.example.com \
 | `--out <dir>` | Content dataset output. Required unless `--capture-mode screenshots`. |
 | `--shots-out <dir>` | Screenshot output. Required when screenshots are requested. |
 | `--sitemap <url>` | Page list from a sitemap. |
-| `--pages-from-dir <dir>` / `--page-marker <file>` | Page list from a static mirror's `public/` tree — the files are the authority on what it can serve. |
+| `--pages-from-dir <dir>` / `--page-marker <file\|*.ext>` | Page list from a static mirror's tree — the files are the authority on what it can serve. See *Page list from a static mirror*. |
+| `--page-rewrite "<from>=><to>,…"` | Prefix rewrites applied to a **derived** page list (mirror or sitemap), for when the two sides spell a path differently. See *Page list from a static mirror*. |
 | `--paths <manifest.json>` | Page list from an existing manifest — how the actual side is pinned to exactly the expected side's pages. |
 | `--stage` | This is the migrated side (names shots `_migrated`, enables status-only parity probes). |
 | `--capture-mode content\|screenshots\|full` | What to record. Default `content`. |
@@ -213,6 +214,38 @@ later, per page, and only for pages actually captured.
 `--rebase` (`body > div:nth-of-type(2)` → `#wrapper`) is a leftover from when selectors were
 absolute positional paths; it is a no-op for class-anchored selectors and is kept only for older
 `index.json` trees.
+
+### Page list from a static mirror
+
+`--pages-from-dir` takes the page list off disk instead of a sitemap, because the FILES are the
+authority on what a mirror can actually serve (one real dataset: 1,782 pages on disk against 601
+`<loc>` entries, 80 of which had no page file at all). Two mirroring tools produce two layouts, and
+`--page-marker` picks which:
+
+| marker | layout | produced by |
+|---|---|---|
+| `prod.html` (any file name) | one file per directory, the directory named after the URL: `public/<path>/prod.html` → `/<path>` | a hand-built mirror app (`D:\cha-prod-mirror`) |
+| `*.html` (a `*.ext` marker) | `<path>.html` → `/<path>`, and `<dir>/index.html` → `/<dir>` | **httrack** (`D:\wsp\prod-mirror`) |
+
+Only the extension is read out of a `*.ext` marker — it is not a general glob. Directories named
+`-` (Sitecore's `/-/media` asset tree) and anything starting with `_` (`_next`, `_assets`) are
+skipped in both modes: thousands of files, no pages.
+
+`--page-rewrite "<from>=><to>,…"` then fixes up a list whose paths the two sides spell differently.
+The case that motivated it: WSP's legacy URLs are lowercased by a Sitecore link provider, so the
+mirror's tree is `en-gl/`, while the migrated frontend routes on the Uniform locale and publishes
+`/en-GL/...`. One page list has to address both, so the locale segment is rewritten to the stage's
+spelling (`/en-gl=>/en-GL`) and the mirror is served case-insensitively. Rules are comma-separated
+(comma, not `|`, because on Windows the CLI is reached through a `.cmd` shim where `|` is a pipe),
+prefix-only, first match wins, and they apply to a **derived** list — `--pages-from-dir` or
+`--sitemap` — never to `--paths`, which is already the canonical list the expected side recorded.
+The rules are recorded in the `pages.json` snapshot next to the dataset.
+
+A mirror can also lie about status: a crawler follows strings that only look like links, and a CMS
+answers those with its own 404 *page* and a 200 *status*, so the mirror serves a page that the live
+site never had. That is the serving side's problem, not this tool's — `D:\wsp\pipeline\utils\prod-mirror-server.mjs`
+restores the 404 by matching the page title — but it is worth knowing when a page list is suspiciously
+large.
 
 ### Where a page URL comes from
 
