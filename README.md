@@ -114,6 +114,7 @@ migration-validate compare --expected ./expected-v2 --actual ./actual-v2 \
 | `--fail-under <n>` | Exit 1 when the overall score is below N. Omit to report only. |
 | `--exclude /a,/b` | Paths deliberately not migrated: listed, not scored. |
 | `--include /a,/b` | Allowlist of paths the frontend covers so far: everything else is out of scope entirely. Empty = whole site. |
+| `--link-target-rewrite "<pattern>=><replacement>,…"` | Regex rewrites applied to the **target** of every link annotation, on both sides. See *Rewriting link targets*. |
 | `--missing-words <n>` | Component report: trim a one-sided component's text to N words (`0` = full, default 8). |
 | `--only-failed` / `--prev-report <path>` | Score only the previously-failing subset. |
 
@@ -335,6 +336,30 @@ markdown **`[text](target)`**, which puts the target into the compared string.
   a real diff worth scoring.
 - It runs **after** the geometry-driven inline-space pass, which measures real rects: lengthening
   every link first would move those rects and silently change where synthetic spaces land.
+
+#### Rewriting link targets
+
+The two sides can spell a target they both serve differently for reasons belonging to how the
+**datasets** were produced rather than to the migration. `--link-target-rewrite` (on `compare`) takes
+comma-separated `pattern=>replacement` regex rules and applies them to each annotation's target, in
+order, on **both** sides.
+
+The case it exists for is an expected side crawled with **httrack**, which rewrites every href in the
+markup it saves: prod serves `/en-gl/what-we-do`, the mirror's copy says `../what-we-do.html`, and the
+capture resolves that to `/en-GL/what-we-do.html`. The migrated site is right to emit no extension, so
+every link in every component diffs by five characters that describe the crawler. Stripping that
+suffix collapses both spellings to one — on WSP's project pages it was worth **+4.2 points** of page
+score, because a link annotation is a large part of a short component's text.
+
+- `$` anchors to the end of the **target**, not of the surrounding text: each target is rewritten on
+  its own, so a mid-path match is left alone and so is the same text outside an annotation.
+- Rules run **after** media-asset masking, so a rule cannot reach inside the placeholder.
+- Which pattern to strip is a property of one project's expected side, so it is configuration: keep
+  the literal in the caller (a pipeline's `.env`), not in this repo.
+
+It is a **comparison-time** rewrite, like the asset masking above and for the same reason: an
+`expected/` dataset is normally a frozen one-time capture, so a capture-side or mirror-side fix would
+only ever reach the stage side.
 
 > **This is part of the dataset contract.** Turning it on or off changes every captured component
 > that contains a link, so the expected side must be re-captured to match — see *Both sides must be

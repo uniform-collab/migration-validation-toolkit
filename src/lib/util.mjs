@@ -117,6 +117,64 @@ const ASSET_LINK_URL = new RegExp(
   "gi"
 );
 
+/** The `](target)` half of the capture's link annotation. */
+const LINK_TARGET = /\]\(([^)]*)\)/g;
+
+let linkTargetRewrites = [];
+
+/**
+ * `--link-target-rewrite "<pattern>=><replacement>[,…]"`: regex rewrites applied to the TARGET of
+ * every link annotation, on BOTH sides, at comparison time.
+ *
+ * The two sides can spell a target they both serve differently, for reasons that belong to how the
+ * datasets were produced rather than to the migration. The case this exists for: an expected side
+ * captured from an **httrack mirror**, which rewrites every href in the markup it saves — prod
+ * serves `/en-gl/what-we-do`, the mirror's copy says `../what-we-do.html`, and the capture resolves
+ * that to `/en-GL/what-we-do.html`. The migrated site correctly emits no extension, so every link
+ * in every component diffs by five characters that describe the crawler, not the site.
+ *
+ * Which pattern to strip is a property of one project's expected side, so it is configuration, not
+ * code: the caller passes it (WSP sets `TEST_LINK_TARGET_REWRITE` in `pipeline/.env`).
+ *
+ * Applied to BOTH sides deliberately. A rule that only ever fires on one of them still must not be
+ * one-sided in the code, because the same normalization is what makes a score comparable; and it
+ * has to live here rather than in the capture because `expected/` is a frozen one-time dataset, so
+ * a capture-side rewrite would only ever reach the stage side — the same argument that puts asset
+ * masking here.
+ *
+ * `$` anchors to the end of the TARGET, not of the surrounding text, because each target is
+ * rewritten on its own. Rules run in order, all of them, so several can compose.
+ */
+export function parseLinkTargetRewrites(value) {
+  if (!value || value === true) return [];
+  return String(value)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((rule) => {
+      const i = rule.indexOf("=>");
+      if (i < 0) {
+        console.error(`Bad --link-target-rewrite rule (expected "pattern=>replacement"): ${rule}`);
+        process.exit(1);
+      }
+      const pattern = rule.slice(0, i).trim();
+      const to = rule.slice(i + 2).trim();
+      if (!pattern) return null;
+      try {
+        return { re: new RegExp(pattern), to };
+      } catch (err) {
+        console.error(`Bad --link-target-rewrite pattern /${pattern}/: ${err.message}`);
+        process.exit(1);
+      }
+    })
+    .filter(Boolean);
+}
+
+/** Installs the rules `normalizeText` applies. Call once, before comparing. */
+export function setLinkTargetRewrites(rules) {
+  linkTargetRewrites = rules ?? [];
+}
+
 /**
  * Whitespace-insensitive normalization used for all comparisons, with
  * un-comparable media-asset URLs masked (see ASSET_LINK_PLACEHOLDER).
@@ -134,11 +192,19 @@ const ASSET_LINK_URL = new RegExp(
  * (9335 of 26864 prod links vs 7254 of 26586 stage ones on the CHA dataset).
  */
 export function normalizeText(raw) {
-  return String(raw ?? "")
+  const text = String(raw ?? "")
     .replace(/\s+/g, " ")
     .replace(/\[ ?([^\]]*?) ?\]\(/g, "[$1](")
     .replace(ASSET_LINK_URL, ASSET_LINK_PLACEHOLDER)
     .trim();
+
+  // After masking, so a rule cannot reach inside an asset placeholder.
+  if (!linkTargetRewrites.length) return text;
+  return text.replace(LINK_TARGET, (whole, target) => {
+    let next = target;
+    for (const rule of linkTargetRewrites) next = next.replace(rule.re, rule.to);
+    return next === target ? whole : `](${next})`;
+  });
 }
 
 export function readJson(file) {

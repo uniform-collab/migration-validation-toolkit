@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeText, ASSET_LINK_PLACEHOLDER } from "./util.mjs";
+import {
+  normalizeText,
+  ASSET_LINK_PLACEHOLDER,
+  parseLinkTargetRewrites,
+  setLinkTargetRewrites,
+} from "./util.mjs";
 
 const P = ASSET_LINK_PLACEHOLDER;
 const link = (target) => `[Download the flyer](${target})`;
@@ -151,4 +156,44 @@ test("bracket trimming does not touch inner spacing or non-annotation brackets",
   assert.equal(normalizeText("[Read  more](/x)"), "[Read more](/x)");
   // No `](` follows, so this is ordinary content and must be left alone.
   assert.equal(normalizeText("see [ note 1 ] below"), "see [ note 1 ] below");
+});
+
+/**
+ * Link-target rewrites. An expected side captured from an httrack mirror carries hrefs the live
+ * site does not serve — the crawler rewrote them when it saved the markup — so every link in every
+ * component diffs by the extension. The rule is configuration (WSP passes `\.html$=>`), so what is
+ * tested here is the mechanism, not the literal.
+ */
+test("rewrites link targets on both sides, and only the target", () => {
+  setLinkTargetRewrites(parseLinkTargetRewrites("\.html$=>"));
+
+  // The expected (mirror) spelling and the stage spelling collapse to the same string.
+  assert.equal(
+    normalizeText("[What we do](/en-GL/what-we-do.html)"),
+    normalizeText("[What we do](/en-GL/what-we-do)")
+  );
+  // `$` anchors to the end of the TARGET, so a match mid-path is left alone...
+  assert.equal(normalizeText("[x](/a.html/b)"), "[x](/a.html/b)");
+  // ...and so is the same text outside an annotation.
+  assert.equal(normalizeText("read index.html for more"), "read index.html for more");
+
+  setLinkTargetRewrites([]);
+});
+
+test("link-target rewrites run in order and compose", () => {
+  setLinkTargetRewrites(parseLinkTargetRewrites("\.html$=>,^/en-gl/=>/en-GL/"));
+  assert.equal(normalizeText("[x](/en-gl/a.html)"), "[x](/en-GL/a)");
+  setLinkTargetRewrites([]);
+});
+
+test("link-target rewrites cannot reach inside an asset placeholder", () => {
+  setLinkTargetRewrites(parseLinkTargetRewrites("\.pdf$=>"));
+  // Masking happens first, so the placeholder is what a rule would have to match — and does not.
+  assert.equal(normalizeText(link("https://canary-files.uniform.global/p/abc-x.pdf")), masked);
+  setLinkTargetRewrites([]);
+});
+
+test("no rules configured is a no-op", () => {
+  setLinkTargetRewrites(parseLinkTargetRewrites(""));
+  assert.equal(normalizeText("[x](/a.html)"), "[x](/a.html)");
 });
