@@ -116,6 +116,7 @@ migration-validate compare --expected ./expected-v2 --actual ./actual-v2 \
 | `--exclude /a,/b` | Paths deliberately not migrated: listed, not scored. |
 | `--include /a,/b` | Allowlist of paths the frontend covers so far: everything else is out of scope entirely. Empty = whole site. |
 | `--link-target-rewrite "<pattern>=><replacement>,…"` | Regex rewrites applied to the **target** of every link annotation, on both sides. See *Rewriting link targets*. |
+| `--exclude-components <names>` | Rendering names left out of the score, on both sides. The capture-time flag of the same name, one layer later — see *Excluding a component*. |
 | `--missing-words <n>` | Component report: trim a one-sided component's text to N words (`0` = full, default 8). |
 | `--only-failed` / `--prev-report <path>` | Score only the previously-failing subset. |
 
@@ -126,7 +127,8 @@ migration-validate compare-screenshots --shots-dir <root> --report-dir ./tests \
   [--run <runId>] [--fail-under 95] [--strict] [--exclude /404]
 ```
 
-`--include` scopes it the same way `compare` does. Pairs prod↔stage element screenshots by
+`--include` and `--exclude-components` scope it the same way `compare` does, so the content and
+visual reports of one run describe the same set of components. Pairs prod↔stage element screenshots by
 `componentKey`, pixel-diffs each pair, writes
 `report-screenshots.md`/`.json` and a diff PNG per differing component. **Advisory by default**
 (exit 0 even below `--fail-under`) unless `--strict`.
@@ -304,6 +306,18 @@ so the diff would move up one level instead of going away.
 
 Use it for what the migration deliberately does not reproduce (e.g. CMS-native form renderings with
 no counterpart in the new frontend).
+
+**Once an expected dataset is frozen, use `compare --exclude-components` instead.** The capture flag
+works on the dataset, so both sides have to be captured with the same value; adding a name to it
+against a frozen expected side drops the component from the actual side only, and every instance
+then scores 0.0 as `missing-on-stage` — worse than not excluding it. Re-capturing the expected side
+to match re-bases the freeze and makes the new report incomparable with every earlier one, which is
+what the freeze exists to prevent. `compare` (and `compare-screenshots`) take the same flag and
+apply it one layer later: both datasets keep the component, the score just leaves it out. The
+trade-off is that it is a plain omission rather than a masked one — the excluded component's text
+stays inside whatever ancestor element also happens to be a target, so check that no ancestor
+inherits it before reaching for the compare-time form. Both reports print what they dropped in
+their header and `report.json` carries an `excludedComponents` array, so neither form is silent.
 
 A page left with **no comparable component at all** (everything excluded or textless) is reported
 under *No comparable components* and **left out of the score** — an empty element list weights to
