@@ -58,6 +58,7 @@ import {
   makePathExcluder,
   makePathIncluder,
 } from "./lib/util.mjs";
+import { parseExcludedComponents } from "./lib/index-json.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const shotsDir = requireArg(args, "shots-dir");
@@ -74,6 +75,11 @@ const onlyFailed = Boolean(args["only-failed"]);
 const excludePaths = makePathExcluder(args["exclude"]);
 // Frontend-coverage allowlist, same meaning as in compare.mjs. Empty = whole site.
 const includePaths = makePathIncluder(args["include"]);
+// Rendering names not to score, same meaning and same flag as in compare.mjs - so the content and
+// screenshot reports of one run describe the same set of components. Empty = score everything.
+const excludeComponents = parseExcludedComponents(args["exclude-components"]);
+const isExcludedComponent = (name) =>
+  excludeComponents.size > 0 && excludeComponents.has(String(name ?? "").trim().toLowerCase());
 
 const prodDir = path.join(shotsDir, "prod");
 
@@ -258,6 +264,7 @@ async function scorePage(pagePath) {
 
   for (const key of allKeys) {
     const name = names.get(key) || key;
+    if (isExcludedComponent(name)) continue;
     const prodImg = path.join(prodPageDir, key, `${key}_prod.png`);
     const migImg = path.join(migPageDir, key, `${key}_migrated.png`);
     const diffImg = path.join(diffPageDir, key, `${key}_diff.png`);
@@ -453,6 +460,9 @@ lines.push(`- Stage (actual): ${migManifest.baseUrl} — captured ${migManifest.
 lines.push(`- Screenshots dir: ${shotsDir}`);
 lines.push(`- Stage screenshots: ${migDir}${run.runId ? ` (run \`${run.runId}\`)` : ""}`);
 lines.push(`- Pages: ${candidatePaths.length} prod-200 with components, ${pages.length} scored${noComponents.length ? `, ${noComponents.length} with no captured components (not scored)` : ""}${excluded.length ? `, ${excluded.length} excluded` : ""}`);
+if (excludeComponents.size) {
+  lines.push(`- Components not scored (\`--exclude-components\`): ${[...excludeComponents].join(", ")} — dropped from BOTH sides, on every page.`);
+}
 if (failedSet) {
   lines.push(`- ⚠️ **FAILED-ONLY subset** (${failedSet.size} pages that failed in the previous content report) — visual score below is over these pages only, not the full site.`);
 }
