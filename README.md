@@ -72,6 +72,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--out <dir>` | Content dataset output. Required unless `--capture-mode screenshots`. |
 | `--shots-out <dir>` | Screenshot output. Required when screenshots are requested. |
 | `--sitemap <url>` | Page list from a sitemap. |
+| `--pages-from-selectors` | Page list from the selector index — the URLs it resolved from each item's `Slug`. **Prefer this over `--pages-from-dir` whenever the site's URLs are not its item names.** See *Page list from the selector index*. |
 | `--pages-from-dir <dir>` / `--page-marker <file\|*.ext>` | Page list from a static mirror's tree — the files are the authority on what it can serve. See *Page list from a static mirror*. |
 | `--page-rewrite "<from>=><to>,…"` | Prefix rewrites applied to a **derived** page list (mirror or sitemap), for when the two sides spell a path differently. See *Page list from a static mirror*. |
 | `--paths <manifest.json>` | Page list from an existing manifest — how the actual side is pinned to exactly the expected side's pages. |
@@ -215,6 +216,29 @@ later, per page, and only for pages actually captured.
 `--rebase` (`body > div:nth-of-type(2)` → `#wrapper`) is a leftover from when selectors were
 absolute positional paths; it is a no-op for class-anchored selectors and is kept only for older
 `index.json` trees.
+
+### Page list from the selector index
+
+`--pages-from-selectors` takes the list from the selector index itself: the URLs it already resolved
+from each item's **`Slug`**, which is Sitecore's own answer to "what is this page's URL". It needs
+`--presentation-root` and `--items-root`, both of which the V2 selector mode wants anyway.
+
+**Prefer it to `--pages-from-dir` whenever a site's URLs are not simply its item names.** A
+presentation dump writes one directory per *item*, so `--pages-from-dir` names each page after the
+item; a site running Sitecore's `useDisplayName` link provider serves the *display name* instead.
+The two agree only while the item name happens to match — in practice, while it is in the site's
+primary language.
+
+Where they disagree, the folder-derived URL exists on **neither** side, and the failure is silent
+rather than loud: the expected side resolves 0 selector targets (the index is keyed by Slug, so
+nothing matches) and the stage returns 404, so the page is captured, counted, and scores nothing.
+On one real dataset that was **113 of 780 project pages** — items such as
+`2025-ruimte-voor-de-rivier-2-0`, whose Slug is `/en-gl/projects/2025-room-for-the-river-2-0`, and
+`adr-e-wsp-la-strategia-…`, whose Slug is `/en-gl/projects/aeroporti-di-roma`. The report said
+"780 pages captured, 666 scored" and nothing explained the difference.
+
+Index keys are lowercased for lookup, so `--page-rewrite` is still what spells the locale the way
+the stage serves it.
 
 ### Page list from a static mirror
 

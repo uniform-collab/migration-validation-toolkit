@@ -361,6 +361,42 @@ function applyPageRewrites(paths, rules) {
 
 async function getPathsToCapture() {
   const rewrites = parsePageRewrites(args["page-rewrite"]);
+  if (args["pages-from-selectors"]) {
+    // The selector index's own keys. It resolved every page's URL from the item export's Slug
+    // (see buildUrlToIndexMap), which is Sitecore's own answer to "what is this page's URL".
+    //
+    // --pages-from-dir cannot do that: it names each page after the DIRECTORY it found, and a
+    // presentation dump writes one directory per item, named after the item. Where a site derives
+    // its URLs from display names instead - Sitecore's `useDisplayName` link provider - the two
+    // disagree, and they disagree exactly where the item name is not English. Measured on WSP's
+    // 780 project pages: 113 of them, e.g. the item `2025-ruimte-voor-de-rivier-2-0` whose Slug is
+    // `/en-gl/projects/2025-room-for-the-river-2-0`. Every one produced a URL that exists on
+    // neither side - 0 selector targets on the expected side, because the index is keyed by Slug,
+    // and a 404 on the stage - so 14% of the page set was silently unscoreable.
+    //
+    // Keys are lowercased for lookup, so --page-rewrite is still what spells the locale the way
+    // the stage serves it.
+    const paths = applyPageRewrites([...urlIndexMap.keys()], rewrites);
+    if (!paths.length) {
+      console.error("The selector index resolved no page URLs - nothing to capture.");
+      process.exit(1);
+    }
+    for (const d of [outDir, shotsOut]) {
+      if (d) {
+        fs.mkdirSync(d, { recursive: true });
+        writeJson(path.join(d, "pages.json"), {
+          source: "selector-index",
+          presentationRoot: args["presentation-root"],
+          itemsRoot: args["items-root"] ?? null,
+          rewrites,
+          count: paths.length,
+          paths,
+        });
+      }
+    }
+    console.log(`Page list: ${paths.length} pages from the selector index (URLs from item Slug).`);
+    return paths.map((p) => ({ path: p, prodStatus: null }));
+  }
   if (args["pages-from-dir"]) {
     const dir = String(args["pages-from-dir"]);
     const marker = String(args["page-marker"] || "prod.html");
@@ -397,7 +433,8 @@ async function getPathsToCapture() {
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
   console.error(
-    "Provide one of --sitemap <url>, --pages-from-dir <static-mirror-dir>, or --paths <manifest.json>"
+    "Provide one of --pages-from-selectors, --sitemap <url>, " +
+      "--pages-from-dir <static-mirror-dir>, or --paths <manifest.json>"
   );
   process.exit(1);
 }
