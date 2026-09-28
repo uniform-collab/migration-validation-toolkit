@@ -252,8 +252,12 @@ export function readComponentDataset(pageDir) {
  * Load the previous report JSON — used both for the regression diff and for the
  * "previously-failed pages" (failed-only) quick-validation mode. From
  * `explicitPath` if given, else the last git commit that changed
- * `<repoRoot>/tests/<reportName>` (the prior run's compare-stage commit — the
- * current run has not committed its own yet). `reportDir` is `<repoRoot>/tests`.
+ * `<reportDir>/<reportName>` (the prior run's compare-stage commit — the
+ * current run has not committed its own yet). `reportDir` may sit at any depth
+ * of the repo (`tests/`, `tests/local/`, ...): the path is taken relative to the
+ * repo's top level, because `git show <commit>:<path>` resolves from there and not
+ * from `-C`. Deriving it as `reportDir/..` found the commit but then asked `git show`
+ * for `local/report.json`, so every report one level deeper said "no previous report".
  * Returns `{ report, source }` or `null` (no previous report / no git).
  */
 export function loadPreviousReport(reportDir, explicitPath, reportName = "report.json") {
@@ -264,9 +268,17 @@ export function loadPreviousReport(reportDir, explicitPath, reportName = "report
       return null;
     }
   }
-  const repoRoot = path.resolve(reportDir, "..");
+  let repoRoot;
+  try {
+    repoRoot = execFileSync("git", ["-C", path.resolve(reportDir), "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null; // the report dir is not in a git repo (or does not exist yet)
+  }
   const rel = path
-    .relative(repoRoot, path.join(reportDir, reportName))
+    .relative(path.resolve(repoRoot), path.resolve(reportDir, reportName))
     .split(path.sep)
     .join("/");
   try {
