@@ -54,6 +54,7 @@ import {
   requireArg,
   pathToSlugDir,
   normalizeText,
+  rewriteLinkTarget,
   readJson,
   writeJson,
   readComponentDataset,
@@ -228,6 +229,22 @@ const fmt = (n) => (Math.floor(n * 10) / 10).toFixed(1);
 // them, and a different stage status (e.g. prod 404 -> stage 200) is a scored
 // failure. stageStatus === null means the actual dataset predates the parity
 // probe (stale capture) — reported, not scored.
+//
+// A REDIRECT is judged by its kind and its target, not by its exact code. 301/308 are both
+// "moved permanently" and 302/303/307 all "found elsewhere" - frameworks do not all let a page
+// pick the code (Next.js answers a permanent redirect with 308, a legacy IIS site with 301), and
+// for a GET the pairs behave the same. What must agree is the Location, compared after the same
+// --link-target-rewrite rules the component text gets. A redirect captured before capture.mjs
+// recorded locations has none on one side; the kind alone decides then.
+const REDIRECT_KIND = { 301: "permanent", 308: "permanent", 302: "temporary", 303: "temporary", 307: "temporary" };
+const redirectTarget = (location) => rewriteLinkTarget(location).replace(/(.)\/+$/, "$1");
+function statusParity(expectedRec, actualRec) {
+  if (expectedRec.status === actualRec.status && !REDIRECT_KIND[expectedRec.status]) return true;
+  const kind = REDIRECT_KIND[expectedRec.status];
+  if (!kind || kind !== REDIRECT_KIND[actualRec.status]) return false;
+  if (!expectedRec.location || !actualRec.location) return true;
+  return redirectTarget(expectedRec.location) === redirectTarget(actualRec.location);
+}
 const prodNon200 = Object.entries(expected.pages)
   .filter(([p, rec]) => rec.status !== 200 && !excludePaths.has(p) && inScope(p))
   .map(([p, rec]) => {
@@ -235,10 +252,12 @@ const prodNon200 = Object.entries(expected.pages)
     return {
       path: p,
       status: rec.status,
+      location: rec.location,
       error: rec.error,
       stageStatus: actualRec ? actualRec.status : null,
+      stageLocation: actualRec ? actualRec.location : undefined,
       stageError: actualRec ? actualRec.error : undefined,
-      mismatch: actualRec ? actualRec.status !== rec.status : false,
+      mismatch: actualRec ? !statusParity(rec, actualRec) : false,
     };
   });
 const statusMismatches = prodNon200.filter((p) => p.mismatch);
@@ -522,13 +541,15 @@ if (prodNon200.length) {
   lines.push("| prod | stage | parity | path |");
   lines.push("|---|---|---|---|");
   for (const p of prodNon200) {
-    const prodCell = p.error ? `error: ${p.error}` : p.status;
+    const prodCell = p.error ? `error: ${p.error}` : p.location ? `${p.status} → ${p.location}` : p.status;
     const stageCell =
       p.stageStatus === null
         ? "—"
         : p.stageError
           ? `error: ${p.stageError}`
-          : p.stageStatus;
+          : p.stageLocation
+            ? `${p.stageStatus} → ${p.stageLocation}`
+            : p.stageStatus;
     const parity =
       p.stageStatus === null
         ? "not probed (stale actual dataset)"

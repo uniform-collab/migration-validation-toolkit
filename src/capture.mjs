@@ -473,8 +473,8 @@ function probeLocalhostStatus(url) {
         timeout: navTimeout,
       },
       (res) => {
-        res.resume();   // drain: we only want the status line
-        resolve(res.statusCode);
+        res.resume();   // drain: we only want the status line (and a redirect's target)
+        resolve({ status: res.statusCode, location: res.headers.location });
       }
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));
@@ -519,16 +519,36 @@ function throttleDelayMs(retryAfter, attempt) {
   return Math.min(2000 * 2 ** (attempt - 1), 30000);
 }
 
+/**
+ * A redirect's target in the shape both sides can be compared in: the path (+ query + hash) when
+ * it stays on the page's own origin - the two sides of a comparison are different hosts, so an
+ * absolute same-origin Location would never match - and the full URL when it leaves the site.
+ */
+function normalizeLocation(location, url) {
+  if (!location) return undefined;
+  try {
+    const target = new URL(location, url);
+    return target.origin === new URL(url).origin ? target.pathname + target.search + target.hash : target.href;
+  } catch {
+    return String(location);
+  }
+}
+
+/** `{ status, location }` without following redirects; `location` only for a redirect. */
 async function getStatus(request, url) {
-  if (isLocalhostHost(url)) return await probeLocalhostStatus(url);
+  if (isLocalhostHost(url)) {
+    const { status, location } = await probeLocalhostStatus(url);
+    return { status, location: status >= 300 && status < 400 ? normalizeLocation(location, url) : undefined };
+  }
   for (let attempt = 1; ; attempt++) {
     const res = await request.get(url, { maxRedirects: 0, timeout: navTimeout, failOnStatusCode: false });
     const status = res.status();
-    if (!THROTTLE_STATUSES.has(status)) return status;
+    const location = status >= 300 && status < 400 ? normalizeLocation(res.headers()["location"], url) : undefined;
+    if (!THROTTLE_STATUSES.has(status)) return { status, location };
     if (attempt >= THROTTLE_MAX_ATTEMPTS) {
       throttleExhausted++;
       console.warn(`  ${status} on ${url} - STILL throttled after ${attempt} attempts; recording it`);
-      return status;
+      return { status, location };
     }
     const wait = throttleDelayMs(res.headers()["retry-after"], attempt);
     console.warn(`  ${status} on ${url} - throttled, waiting ${Math.round(wait / 1000)}s`);
@@ -628,7 +648,10 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
   let url = baseUrl + pagePath;
   const rec = { status: 0 };
 
-  rec.status = await getStatus(context.request, url);
+  const probe = await getStatus(context.request, url);
+  rec.status = probe.status;
+  // A redirect is compared by where it goes, not only by its code (see compare.mjs).
+  if (probe.location) rec.location = probe.location;
 
   // Route-protected page + a preview secret => re-probe once through the bypass and, if that
   // opens it, capture from the bypass URL. Skipped for statusOnly pages on purpose: those are
@@ -637,7 +660,7 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
   // does nothing until the prod baseline for protected pages is captured signed in.
   if (previewSecret && !statusOnly && PROTECTED_STATUSES.has(rec.status)) {
     const bypassUrl = withPreviewBypass(url);
-    const bypassStatus = await getStatus(context.request, bypassUrl);
+    const bypassStatus = (await getStatus(context.request, bypassUrl)).status;
     if (bypassStatus === 200) {
       rec.status = bypassStatus;
       rec.previewBypass = true;

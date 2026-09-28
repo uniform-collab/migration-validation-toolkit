@@ -175,6 +175,13 @@ export function setLinkTargetRewrites(rules) {
   linkTargetRewrites = rules ?? [];
 }
 
+/** The --link-target-rewrite rules applied to one bare URL - a redirect's Location, say. */
+export function rewriteLinkTarget(target) {
+  let next = String(target ?? "");
+  for (const rule of linkTargetRewrites) next = next.replace(rule.re, rule.to);
+  return next;
+}
+
 /**
  * Whitespace-insensitive normalization used for all comparisons, with
  * un-comparable media-asset URLs masked (see ASSET_LINK_PLACEHOLDER).

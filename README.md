@@ -431,7 +431,9 @@ only ever reach the stage side.
 During capture, images/media/fonts are network-blocked in `content` mode (text-only comparison, a
 large speed win), the page is scrolled once end-to-end to trigger lazy loaders, and navigation waits
 for `load` + the scope selector + a short settle. Page status is taken from a direct HTTP request
-**without following redirects** — a 3xx counts as "not 200" and is reported as such.
+**without following redirects** — a 3xx counts as "not 200" and is reported as such, and its
+`Location` is recorded in the page's record (`location`; a path when it stays on the page's own
+origin, the full URL when it leaves it).
 
 ---
 
@@ -463,6 +465,11 @@ score = 100 * LCS(prodText, stageText).length / max(prodText.length, stageText.l
 - **Status parity**: a page that is non-200 on the expected side must return the **same** status on
   the actual side. A mismatch (e.g. expected 404 → actual 200: a page that should not exist is being
   served) scores the page 0 and joins the overall mean; a matching status is reported, not scored.
+  **A redirect matches by kind and target, not by exact code**: 301 and 308 are both permanent,
+  302/303/307 all temporary (frameworks do not all let a page pick — Next.js answers a permanent
+  redirect with 308 where a legacy site sends 301), and the two `Location`s must agree after the
+  `--link-target-rewrite` rules. A dataset captured before locations were recorded is judged by
+  kind alone.
 - **Overall score** = mean of page scores across scored expected-200 pages plus any status-parity
   mismatches. `--exclude` paths are reported but not scored.
 
