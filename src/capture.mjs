@@ -46,6 +46,7 @@ import {
   getSharp,
   attachNetworkQuiescer,
 } from "./lib/screenshot.mjs";
+import { ConcurrencyTuner, defaultMaxConcurrency } from "./lib/autotune.mjs";
 import {
   parseArgs,
   requireArg,
@@ -118,7 +119,15 @@ let excludedComponents = new Set();
 }
 console.log(`Capture mode: ${captureMode} (content=${doContent}, screenshots=${doShots})${isStage ? " [stage]" : ""}`);
 
-const concurrency = Math.max(1, parseInt(args["concurrency"] || "6", 10) || 6);
+// --concurrency auto: the pool is sized while the run is in flight (see lib/autotune.mjs),
+// starting low and never above --concurrency-max (default: what the host's CPUs and memory hold).
+const concurrencyArg = String(args["concurrency"] ?? "6").trim().toLowerCase();
+const autoConcurrency = concurrencyArg === "auto";
+const concurrencyMax = Math.max(1, parseInt(args["concurrency-max"] || "0", 10) || defaultMaxConcurrency());
+const concurrency = autoConcurrency
+  ? Math.min(4, concurrencyMax)
+  : Math.max(1, parseInt(concurrencyArg, 10) || 6);
+const autotuneIntervalMs = Math.max(2, parseInt(args["autotune-interval"] || "15", 10) || 15) * 1000;
 const limit = parseInt(args["limit"] || "0", 10) || 0;
 // Allowlist of paths the migrated frontend covers so far (exact or `*` glob).
 // Empty = the whole page list. See makePathIncluder.
@@ -613,7 +622,9 @@ async function continueSameOrigin(route, type) {
   }
 }
 
-async function capturePage(context, pagePath, statusOnly) {
+// `signals` collects load symptoms that leave no trace in the record itself (a navigation that
+// timed out is scraped as-is), for the concurrency tuner. Never written to the dataset.
+async function capturePage(context, pagePath, statusOnly, signals = {}) {
   let url = baseUrl + pagePath;
   const rec = { status: 0 };
 
@@ -662,6 +673,7 @@ async function capturePage(context, pagePath, statusOnly) {
       resp = await page.goto(url, { waitUntil: doShots ? "networkidle" : "load", timeout: navTimeout });
     } catch (err) {
       if (err.name !== "TimeoutError") throw err;
+      signals.navTimeout = true;
       // proceed with whatever loaded — matches the old system's behavior
     }
     // The navigation is a SECOND request, so it can be throttled even though the status
@@ -877,7 +889,32 @@ let non200 = 0;
 let bypassed = 0;
 const queue = [...items];
 
+// Workers read the tuner's target before each page: one above it retires, and the controller
+// below spawns new ones when the target rises. Without --concurrency auto there is no tuner and
+// the pool is the fixed --concurrency it always was.
+const tuner = autoConcurrency
+  ? new ConcurrencyTuner({ start: concurrency, max: concurrencyMax, intervalMs: autotuneIntervalMs })
+  : null;
+let active = 0;
+
 async function worker() {
+  // Counted synchronously, before the first await, so the controller never over-spawns.
+  active++;
+  let counted = true;
+  const release = () => {
+    if (counted) {
+      counted = false;
+      active--;
+    }
+  };
+  try {
+    await runWorker(release);
+  } finally {
+    release();
+  }
+}
+
+async function runWorker(release) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
     serviceWorkers: "block",
@@ -903,6 +940,10 @@ async function worker() {
   });
 
   for (;;) {
+    if (tuner && active > tuner.target) {
+      release();
+      break;
+    }
     const item = queue.shift();
     if (item === undefined) break;
     const { path: pagePath, prodStatus } = item;
@@ -919,9 +960,15 @@ async function worker() {
     }
 
     let rec;
+    // Load symptoms for the tuner. A zero-capture retry is deliberately not one: a page that
+    // genuinely has no components would otherwise hold the pool down for the whole run.
+    const signals = {};
+    const degraded = new Set();
+    const pageStarted = Date.now();
     for (let attempt = 1; ; attempt++) {
       try {
-        rec = await capturePage(context, pagePath, statusOnly);
+        rec = await capturePage(context, pagePath, statusOnly, signals);
+        if (rec.throttled) degraded.add("throttled");
         // Throttled navigation: back off and re-run the whole page. Applies on both sides and
         // regardless of --no-retry, because the alternative is writing a phantom non-200.
         if (rec.throttled) {
@@ -953,12 +1000,14 @@ async function worker() {
         // produced five such pages, every one of them answering 200 on an immediate re-request.
         const worthOneRetry = looksTransient && prodStatus === 200 && attempt < 2;
         if (args["paths"] && looksTransient && (worthOneRetry || (!noRetry && attempt < 3))) {
+          degraded.add("transient status");
           console.warn(`  status ${rec.status} on ${pagePath} - retrying in 10s`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
         }
         break;
       } catch (err) {
+        degraded.add("exception");
         const maxAttempts = noRetry ? 1 : args["paths"] ? 3 : 2;
         if (attempt >= maxAttempts) {
           rec = { status: 0, error: String(err.message || err).slice(0, 300) };
@@ -974,6 +1023,13 @@ async function worker() {
     if (doContent) writeJson(markerPath(outDir, pagePath), rec);
     if (doShots) writeJson(markerPath(shotsOut, pagePath), rec);
     done++;
+    if (tuner) {
+      if (signals.navTimeout) degraded.add("nav timeout");
+      if (rec.shotsUnstable) degraded.add("unstable layout");
+      // Parity probes are a status request, not a page load: they say nothing about throughput.
+      // Work = the page's component count: in full mode its time grows with its shots.
+      tuner.record([...degraded], !statusOnly, rec.targets || 1, Date.now() - pageStarted);
+    }
     if (!statusOnly && rec.status !== 200) non200++;
     if (rec.previewBypass) bypassed++;
     const extra = statusOnly
@@ -991,7 +1047,17 @@ async function worker() {
   await context.close();
 }
 
-await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+const running = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+const controller = tuner
+  ? setInterval(() => {
+      const target = tuner.tick();
+      while (active < target && queue.length > 0) running.push(worker());
+    }, 1000)
+  : null;
+// The pool can grow while we wait, so drain until no worker is left.
+while (running.length) await Promise.all(running.splice(0));
+if (controller) clearInterval(controller);
+if (tuner) console.log(tuner.summary());
 await browser.close();
 
 // Aggregate per-page markers into a manifest, once per active output dir.
@@ -1043,7 +1109,9 @@ if (items.length === 0 || failed > items.length / 2) {
 if (throttleExhausted) {
   console.error(
     `Capture poisoned: ${throttleExhausted} page(s) still throttled after ${THROTTLE_MAX_ATTEMPTS} attempts. ` +
-      `Re-run with a lower --concurrency (current ${concurrency}).`
+      (tuner
+        ? `Re-run with a lower --concurrency-max (the tuner ended at ${tuner.target}).`
+        : `Re-run with a lower --concurrency (current ${concurrency}).`)
   );
   process.exit(1);
 }

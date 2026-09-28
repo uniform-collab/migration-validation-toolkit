@@ -85,7 +85,8 @@ migration-validate capture --base-url https://stage.example.com \
 | `--body-only false` | Include header/footer/analytics instead of main content only. |
 | `--exclude-components <names>` | Rendering names resolved and masked, but never compared. |
 | `--include /a,/b` | Allowlist of paths the migrated frontend covers so far (exact or `*` glob). Empty = the whole page list. See *Scoping a partially-built frontend*. |
-| `--concurrency <n>` | Parallel browser contexts. |
+| `--concurrency <n>\|auto` | Parallel browser contexts. `auto` sizes the pool while the run is in flight — see *Auto concurrency*. |
+| `--concurrency-max <n>` / `--autotune-interval <s>` | Upper bound for `auto` (default: the host's CPUs, or its **free** memory at ~600 MB a worker, whichever is lower) and the shortest measurement window (default 15). |
 | `--limit <n>` | Smoke mode: first N pages only. |
 | `--resume` | Skip pages already present in the output dataset. |
 | `--only-failed` / `--prev-report <path>` | Re-capture only the pages that scored < 100 in the previous report. |
@@ -342,6 +343,30 @@ to test rather than 4416.
 The two are independent: a page must be included **and** not excluded. An allowlisted page that is
 also excluded stays out — an exclusion states something about the *migration*, which outranks a
 statement about frontend coverage.
+
+### Auto concurrency (`--concurrency auto`)
+
+The right pool size depends on the host, on the server being crawled and on how heavy its pages
+are, and a wrong one is worse than slow: under too much load a capture gets **wrong**, not just
+late — a starved navigation times out and is scraped half-rendered, a shot is taken while the
+layout still moves, a throttled stylesheet leaves text un-transformed. Nothing downstream tells
+those from real migration differences. So `auto` maximises throughput **only among levels that
+capture cleanly** (`src/lib/autotune.mjs`):
+
+- **Throughput** — a hill climb on pages/s, the one siphon's `ThreadAutoTuner` uses (keep a step
+  that beats the previous window by 5%, else revert and try the other direction), preceded by a
+  ×1.5 slow start from 4, because a capture is minutes long and +1 per window would never get there.
+- **Quality** — any window in which a page showed a load symptom (navigation timeout, throttled
+  response, a transient non-200 or exception that needed a retry, a shot skipped for an unstable
+  layout, host memory under 8% free) cuts the pool by a quarter at once and makes the level that
+  hurt a **ceiling** the climb may not re-enter. It lifts by one after 6 clean windows, because a
+  cold server's first minute is not its steady state. A zero-capture retry is deliberately not a
+  symptom: a page that genuinely has no components would hold the pool down all run.
+
+A window closes once it has lasted `--autotune-interval` **and** completed one page per worker, so a
+single slow page cannot decide it; status-only parity probes do not count toward throughput. Every
+verdict is logged as an `[autotune]` line, and the run ends with the best clean rate and the level
+that achieved it — a good value to pin with a plain `--concurrency <n>` if a run must be repeatable.
 
 ---
 

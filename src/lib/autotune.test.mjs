@@ -1,0 +1,66 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { initialState, decide } from "./autotune.mjs";
+
+const clean = (completed, seconds = 10) => ({ seconds, completed, degraded: 0 });
+const bad = (completed = 5) => ({ seconds: 10, completed, degraded: 1, reasons: ["1 nav-timeout"] });
+
+test("slow start grows multiplicatively while throughput improves", () => {
+  let s = initialState({ start: 4, max: 32 });
+  ({ state: s } = decide(s, clean(10))); // baseline at 4
+  assert.equal(s.target, 6);
+  ({ state: s } = decide(s, clean(15))); // better -> keep, grow
+  assert.equal(s.target, 9);
+  ({ state: s } = decide(s, clean(15))); // no better -> revert to 6, switch to +/-1
+  assert.equal(s.target, 6);
+  assert.equal(s.phase, "climb");
+  ({ state: s } = decide(s, clean(15))); // fresh baseline at 6 -> try 7
+  assert.equal(s.target, 7);
+});
+
+test("a slow-start step past the max tries the max itself", () => {
+  let s = initialState({ start: 9, max: 11 });
+  ({ state: s } = decide(s, clean(10)));
+  assert.equal(s.target, 11);
+});
+
+test("hill climb reverses after a step that did not help", () => {
+  let s = { ...initialState({ start: 6, max: 32 }), phase: "climb" };
+  ({ state: s } = decide(s, clean(10))); // baseline 6 -> 7
+  assert.equal(s.target, 7);
+  ({ state: s } = decide(s, clean(10))); // no better -> revert to 6, direction flips
+  assert.equal(s.target, 6);
+  assert.equal(s.direction, -1);
+  ({ state: s } = decide(s, clean(10))); // baseline 6 -> 5
+  assert.equal(s.target, 5);
+});
+
+test("a degraded window backs off and caps the climb below the level that hurt", () => {
+  let s = { ...initialState({ start: 12, max: 32 }), phase: "climb" };
+  ({ state: s } = decide(s, bad()));
+  assert.equal(s.target, 9);
+  assert.equal(s.ceiling, 11);
+  // Climbing never proposes a level above the ceiling.
+  for (let i = 0; i < 4; i++) ({ state: s } = decide(s, clean(100 + i * 50)));
+  assert.ok(s.target <= 11, `target ${s.target} above ceiling`);
+});
+
+test("the ceiling relaxes after enough clean windows", () => {
+  let s = { ...initialState({ start: 8, max: 32 }), phase: "climb" };
+  ({ state: s } = decide(s, bad()));
+  const capped = s.ceiling;
+  for (let i = 0; i < 6; i++) ({ state: s } = decide(s, clean(10)));
+  assert.equal(s.ceiling, capped + 1);
+});
+
+test("never goes below min or above max, and holds on an empty window", () => {
+  let s = initialState({ start: 1, max: 2 });
+  ({ state: s } = decide(s, bad()));
+  assert.equal(s.target, 1);
+  const before = s;
+  ({ state: s } = decide(s, clean(0)));
+  assert.deepEqual(s, before);
+  s = initialState({ start: 2, max: 2 });
+  ({ state: s } = decide(s, clean(10)));
+  assert.ok(s.target >= 1 && s.target <= 2);
+});
