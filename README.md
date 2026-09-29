@@ -87,6 +87,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--include /a,/b` | Allowlist of paths the migrated frontend covers so far (exact or `*` glob). Empty = the whole page list. See *Scoping a partially-built frontend*. |
 | `--concurrency <n>\|auto` | Parallel browser contexts. `auto` sizes the pool while the run is in flight — see *Auto concurrency*. |
 | `--concurrency-max <n>` / `--autotune-interval <s>` | Upper bound for `auto` (default: the host's CPUs, or its **free** memory at ~600 MB a worker, whichever is lower) and the shortest measurement window (default 15). |
+| `--concurrency-start <n>` | Where `auto` starts (default 4, clamped to `--concurrency-max`). A short capture ends before the slow-start climbs far; start higher on a host known to hold it. |
 | `--limit <n>` | Smoke mode: first N pages only. |
 | `--resume` | Skip pages already present in the output dataset. |
 | `--merge-manifest` | Keep the pages an earlier capture into the same output dir listed in `manifest.json`, instead of rewriting it with only this capture's pages. With `--resume`, lets several page scopes (a sample and a full scope) share one dataset. |

@@ -125,8 +125,12 @@ console.log(`Capture mode: ${captureMode} (content=${doContent}, screenshots=${d
 const concurrencyArg = String(args["concurrency"] ?? "6").trim().toLowerCase();
 const autoConcurrency = concurrencyArg === "auto";
 const concurrencyMax = Math.max(1, parseInt(args["concurrency-max"] || "0", 10) || defaultMaxConcurrency());
+// Where auto starts (default 4). A short capture - a few dozen pages - ends before the slow-start
+// has climbed far, so a host known to hold more can start there instead of spending most of the
+// run at 4-9 workers. Clamped to --concurrency-max.
+const concurrencyStart = Math.max(1, parseInt(args["concurrency-start"] || "4", 10) || 4);
 const concurrency = autoConcurrency
-  ? Math.min(4, concurrencyMax)
+  ? Math.min(concurrencyStart, concurrencyMax)
   : Math.max(1, parseInt(concurrencyArg, 10) || 6);
 const autotuneIntervalMs = Math.max(2, parseInt(args["autotune-interval"] || "15", 10) || 15) * 1000;
 const limit = parseInt(args["limit"] || "0", 10) || 0;
