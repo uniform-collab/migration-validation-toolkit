@@ -134,6 +134,31 @@ export async function freezeAnimations(page) {
   await page.waitForTimeout(500);
   await page
     .evaluate(async () => {
+      // Timers registered BEFORE the freeze - a carousel's autoplay interval - survive the stubs
+      // below and keep advancing the page, and a slide started after the freeze never finishes
+      // (its end timer is stubbed), leaving two slides shown at once. How far a side got depends
+      // only on how long it took to settle, so prod read "1 / 6" where the stage read
+      // "1 / 6 2 / 6". Clear every live timer first.
+      const top = window.setTimeout(() => {}, 0);
+      for (let id = 0; id <= top; id++) {
+        clearTimeout(id);
+        clearInterval(id);
+      }
+      // ...and put every Bootstrap (3 `.item` / 4-5 `.carousel-item`) carousel back on its first
+      // slide by class, so both sides are captured in the same state. Done on the classes rather
+      // than through the plugin: with transitions off a stuck slide() never resets `sliding`.
+      document.querySelectorAll(".carousel").forEach((carousel) => {
+        const items = [...carousel.querySelectorAll(".carousel-inner > .item, .carousel-inner > .carousel-item")];
+        if (items.length === 0) return;
+        const moving = ["active", "next", "prev", "left", "right",
+          "carousel-item-next", "carousel-item-prev", "carousel-item-start", "carousel-item-end"];
+        items.forEach((item, i) => {
+          item.classList.remove(...moving);
+          if (i === 0) item.classList.add("active");
+        });
+        const dots = [...carousel.querySelectorAll(".carousel-indicators > *")];
+        dots.forEach((dot, i) => dot.classList.toggle("active", i === 0));
+      });
       window.requestAnimationFrame = () => {};
       window.setInterval = () => 0;
       window.setTimeout = () => 0;
