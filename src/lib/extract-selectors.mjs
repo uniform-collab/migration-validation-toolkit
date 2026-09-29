@@ -156,6 +156,12 @@ export function collectComponentTexts(cfg) {
       // button, which carries no annotation at all. A real in-page anchor (`#section`)
       // still annotates; only the empty fragment is a hook.
       if (target === "#" || /^javascript:/i.test(target)) continue;
+      // An anchor with no text and no element content renders nothing and cannot be
+      // clicked - rich-text editor residue (an RTE leaves `<a href=x></a>` in front of a
+      // retyped link). Annotating it scores a migration that drops the junk as a lost
+      // link. An icon-only link (`<a><i class="fa …"></i></a>`) has an element child and
+      // still annotates.
+      if (!a.textContent.trim() && !a.querySelector("*")) continue;
       try {
         const u = new URL(target, document.baseURI);
         target =
