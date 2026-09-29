@@ -120,6 +120,44 @@ export async function removeOverlayElements(page, overlaySelectors) {
     .catch(() => {});
 }
 
+/**
+ * One screenshot of the WHOLE page, for a human to take in the page at a glance next to the
+ * other side's. It is deliberately outside every score: compare-screenshots only walks the
+ * per-component subfolders of a page dir, and this file sits in the page dir itself.
+ *
+ * Taken after the settle + freezeAnimations + overlay removal, before the component shots, so
+ * it shows the same frozen state they are cut from. Full pages get tall (a project page with a
+ * related-projects band is 8-12k px at 1280 wide), so it is a JPEG and it is clipped at
+ * `maxHeight` px - the page header and body are what a reviewer looks at, and a clip beats a
+ * 30 MB PNG or a capture that fails on Chromium's texture limit. Returns
+ * `{ file, width, height, pageHeight, truncated }`, or null when the shot failed.
+ */
+export async function captureFullPage(page, file, { maxHeight = 16000, quality = 70 } = {}) {
+  try {
+    const dims = await page.evaluate(() => ({
+      width: document.documentElement.clientWidth || window.innerWidth,
+      height: Math.max(
+        document.documentElement.scrollHeight,
+        document.body ? document.body.scrollHeight : 0
+      ),
+    }));
+    const height = Math.max(1, Math.min(dims.height, maxHeight));
+    await page.screenshot({
+      path: file,
+      type: "jpeg",
+      quality,
+      fullPage: true,
+      clip: { x: 0, y: 0, width: dims.width, height },
+      animations: "disabled",
+      timeout: 60000,
+    });
+    return { width: dims.width, height, pageHeight: dims.height, truncated: dims.height > height };
+  } catch (err) {
+    console.warn(`  full-page shot failed: ${String(err?.message || err).split("\n")[0]}`);
+    return null;
+  }
+}
+
 export async function freezeAnimations(page) {
   await page.addStyleTag({
     content: `

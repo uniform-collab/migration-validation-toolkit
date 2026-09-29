@@ -98,6 +98,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--shot-idle-quiet` / `--shot-idle-max` / `--shot-component-idle-max` | Network-idle gate (ms; `0` disables). |
 | `--shot-stable-poll` / `--shot-stable-max` | Layout-stability gate (ms; `0` disables). |
 | `--shot-stitch 0` | Fall back to `elementHandle.screenshot()` instead of tile+stitch. |
+| `--full-page-shot false` / `--full-page-max-height <px>` / `--full-page-quality <1-100>` | The per-page full-page JPEG (on by default whenever shots are; clipped at 16000 px, quality 70). Never scored — see [Full-page shot](#full-page-shot-not-scored). |
 
 > **Both sides must use identical gate values.** Different settling rules on the expected and
 > actual captures make the two datasets incomparable — that is why the gates are inputs, not
@@ -688,10 +689,12 @@ meant to be committed). `--shots-out` / `--shots-dir` point at one external root
 ```
 <shots root>/
   prod/                    <page_slug>/<componentKey>/<componentKey>_prod.png      (+ manifest.json, .components.json)
+                           <page_slug>/_page_prod.jpg                               (full-page shot, not scored)
   runs/
     latest.json            { runId } — the last run that captured successfully
     <runId>/
       migrated/            <page_slug>/<componentKey>/<componentKey>_migrated.png  (+ manifest.json, .components.json)
+                           <page_slug>/_page_migrated.jpg                           (full-page shot, not scored)
       diff/                <page_slug>/<componentKey>/<componentKey>_diff.png
 ```
 
@@ -702,6 +705,23 @@ their version history. `compare-screenshots` records the run it scored in `repor
 and the viewer resolves PNGs through that field, so checking out an older run's report and reloading
 the viewer shows that run's screenshots as long as its directory is still on disk.
 
+
+### Full-page shot (not scored)
+
+Before the component shots, every page is also photographed WHOLE — one `_page_<side>.jpg` in the
+page's shot dir, taken after the settle, `freezeAnimations` and `--remove-before`, so it shows the
+same frozen state the component shots are cut from. It is there for a person: to see the two pages
+side by side and understand a component diff in context without opening both sites.
+
+It is **outside every number**. `compare-screenshots` only walks the per-component subfolders of a
+page dir, and this file sits in the page dir itself, so it adds nothing to a page's visual score,
+the component counts or the regression diff; no diff image is made of it. Its size is recorded on
+the page marker (`fullPage: { file, width, height, pageHeight, truncated }`), which is how it
+reaches `manifest.json` and how a viewer finds it.
+
+It is a JPEG (quality 70) clipped at 16000 px: full pages at 1280 wide run to 8-12k px, a PNG of that
+is tens of MB, and a single oversized capture can fail on Chromium's texture limit. `truncated: true`
+says a page was taller than the clip. `--full-page-shot false` turns it off.
 ---
 
 ## Dataset layout (content)

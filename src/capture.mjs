@@ -39,6 +39,7 @@ import {
 } from "./lib/index-json.mjs";
 import {
   freezeAnimations,
+  captureFullPage,
   removeOverlayElements,
   resolveAndTagTargets,
   captureResolvedTargets,
@@ -158,6 +159,12 @@ const navTimeout = parseInt(args["timeout"] || "60000", 10) || 60000;
 // Screenshot tuning (only used when doShots).
 const minHeight = parseInt(args["min-height"] || "30", 10) || 30;
 const maxHeight = parseInt(args["max-height"] || "9000", 10) || 9000;
+// One whole-page JPEG per page, taken before the component shots, for a reviewer to see the
+// page next to the other side's - never scored (see captureFullPage). On whenever shots are;
+// `--full-page-shot false` turns it off. Clipped at --full-page-max-height px.
+const fullPageShot = doShots && String(args["full-page-shot"] ?? "true").toLowerCase() !== "false";
+const fullPageMaxHeight = Math.max(720, parseInt(args["full-page-max-height"] ?? "16000", 10) || 16000);
+const fullPageQuality = Math.min(100, Math.max(1, parseInt(args["full-page-quality"] ?? "70", 10) || 70));
 const overlaySelectors = parseOverlaySelectors(args["remove-before"]);
 const scrollStepDelay = doShots ? 60 : 40;
 // Network-idle gate for the shot pass. `networkidle` on goto only covers the
@@ -770,6 +777,20 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
  * produce content (masked innerText) and/or screenshots from the same page.
  */
 async function captureV2(page, pagePath, rec, quiescer) {
+  // ---- full-page shot (FIRST, not scored) — the page as the component shots below see it:
+  //      settled, frozen, overlays removed. Recorded on the page marker, so it reaches the
+  //      shots manifest as `fullPage`; the file is `<slug>/_page<suffix>.jpg`. ----
+  if (fullPageShot) {
+    const shotsPageDir = path.join(shotsOut, pathToSlugDir(pagePath));
+    fs.mkdirSync(shotsPageDir, { recursive: true });
+    const file = `_page${shotSuffix}.jpg`;
+    const shot = await captureFullPage(page, path.join(shotsPageDir, file), {
+      maxHeight: fullPageMaxHeight,
+      quality: fullPageQuality,
+    });
+    if (shot) rec.fullPage = { file, ...shot };
+  }
+
   const indexPath = urlIndexMap.get(normalizeUrlForLookup(pagePath));
   if (!indexPath) {
     rec.noIndex = true;
