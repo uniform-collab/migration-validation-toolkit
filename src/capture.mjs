@@ -1084,8 +1084,25 @@ if (tuner) console.log(tuner.summary());
 await browser.close();
 
 // Aggregate per-page markers into a manifest, once per active output dir.
+//
+// --merge-manifest keeps the pages an EARLIER capture into the same dir listed and this one did
+// not ask for, so several page scopes can share one dataset: a narrow scope captured with
+// --resume into a dir a wide scope already filled visits nothing and leaves the wide manifest
+// intact, where a plain rewrite would shrink it to the narrow scope's pages. Pages this capture
+// did ask for are re-read from their markers either way.
+const mergeManifest = Boolean(args["merge-manifest"]);
 function writeManifest(dir) {
   const pages = {};
+  if (mergeManifest) {
+    const prevFile = path.join(dir, "manifest.json");
+    if (fs.existsSync(prevFile)) {
+      try {
+        Object.assign(pages, readJson(prevFile).pages || {});
+      } catch {
+        // an unreadable manifest is rebuilt from this capture's markers alone
+      }
+    }
+  }
   for (const { path: pagePath } of items) {
     const m = markerPath(dir, pagePath);
     pages[pagePath] = fs.existsSync(m) ? readJson(m) : { status: 0, error: "not captured" };

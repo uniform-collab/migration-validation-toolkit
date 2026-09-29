@@ -89,6 +89,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--concurrency-max <n>` / `--autotune-interval <s>` | Upper bound for `auto` (default: the host's CPUs, or its **free** memory at ~600 MB a worker, whichever is lower) and the shortest measurement window (default 15). |
 | `--limit <n>` | Smoke mode: first N pages only. |
 | `--resume` | Skip pages already present in the output dataset. |
+| `--merge-manifest` | Keep the pages an earlier capture into the same output dir listed in `manifest.json`, instead of rewriting it with only this capture's pages. With `--resume`, lets several page scopes (a sample and a full scope) share one dataset. |
 | `--only-failed` / `--prev-report <path>` | Re-capture only the pages that scored < 100 in the previous report. |
 | `--timeout <ms>` / `--no-retry` | Navigation budget and retry behaviour. |
 | `--min-height` / `--max-height` / `--remove-before` | Element thresholds and pre-capture removals. |
