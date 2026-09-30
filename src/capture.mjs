@@ -99,24 +99,49 @@ let excludedComponents = new Set();
   // Frozen Sitecore item export (data/items/<lang>). Optional, but without it page URLs fall
   // back to slugified ItemPaths, which cannot reproduce Sitecore's bucket/whitespace rules and
   // silently leaves pages out of the comparison — see buildUrlToIndexMap.
-  const itemsRoot =
+  const itemsRootArg =
     typeof args["items-root"] === "string" && args["items-root"].trim()
       ? args["items-root"].trim()
       : undefined;
-  const built = buildUrlToIndexMap(presentationRoot, itemRoot, itemsRoot);
-  urlIndexMap = built.map;
-  const st = built.stats || {};
-  console.log(
-    `V2 selector mode: indexed ${built.files.length} index.json under ${presentationRoot} ` +
-      `(root ItemPath ${built.rootItemPath}); ${urlIndexMap.size} URLs; body-only=${bodyOnly}.`
-  );
-  console.log(
-    itemsRoot
-      ? `  URLs from item Slug: ${st.fromSlug || 0}, from ItemPath fallback: ${st.fromItemPath || 0}, ` +
-          `unresolved: ${st.unresolved || 0}, duplicates: ${st.duplicates || 0} (items root ${itemsRoot}).`
-      : `  WARNING: no --items-root given; all ${st.fromItemPath || 0} URLs derived from ItemPath. ` +
-          `Pages whose Sitecore URL differs from their tree path will not be scored.`
-  );
+  // Several languages: `--presentation-root a|b|c` (one presentation dump per language, e.g.
+  // data/html/en-GL,data/html/sv-SE) with `--items-root` naming each one's item export in the same
+  // order (or ONE items root shared by all). Each pair is indexed on its own - a page's Slug carries
+  // its locale (/sv-se/...), so the maps never collide - and merged into one page list, so a single
+  // capture and a single report cover every language. One root behaves exactly as before.
+  const presentationRoots = String(presentationRoot).split(",").map((x) => x.trim()).filter(Boolean);
+  const itemsRoots = itemsRootArg ? itemsRootArg.split(",").map((x) => x.trim()).filter(Boolean) : [];
+  if (itemsRoots.length > 1 && itemsRoots.length !== presentationRoots.length) {
+    console.error(
+      `--items-root names ${itemsRoots.length} roots for ${presentationRoots.length} --presentation-root(s); ` +
+        "give one per presentation root, in the same order, or a single one."
+    );
+    process.exit(1);
+  }
+  urlIndexMap = new Map();
+  presentationRoots.forEach((root, i) => {
+    const itemsRoot = itemsRoots.length > 1 ? itemsRoots[i] : itemsRoots[0];
+    const built = buildUrlToIndexMap(root, itemRoot, itemsRoot);
+    let added = 0;
+    for (const [url, file] of built.map) {
+      if (!urlIndexMap.has(url)) {
+        urlIndexMap.set(url, file);
+        added++;
+      }
+    }
+    const st = built.stats || {};
+    console.log(
+      `V2 selector mode: indexed ${built.files.length} index.json under ${root} ` +
+        `(root ItemPath ${built.rootItemPath}); ${added} URLs; body-only=${bodyOnly}.`
+    );
+    console.log(
+      itemsRoot
+        ? `  URLs from item Slug: ${st.fromSlug || 0}, from ItemPath fallback: ${st.fromItemPath || 0}, ` +
+            `unresolved: ${st.unresolved || 0}, duplicates: ${st.duplicates || 0} (items root ${itemsRoot}).`
+        : `  WARNING: no --items-root given; all ${st.fromItemPath || 0} URLs derived from ItemPath. ` +
+            `Pages whose Sitecore URL differs from their tree path will not be scored.`
+    );
+  });
+  if (presentationRoots.length > 1) console.log(`V2 selector mode: ${urlIndexMap.size} URLs across ${presentationRoots.length} presentation roots.`);
 }
 console.log(`Capture mode: ${captureMode} (content=${doContent}, screenshots=${doShots})${isStage ? " [stage]" : ""}`);
 
