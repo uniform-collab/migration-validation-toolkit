@@ -226,7 +226,8 @@ let sharpMod = null;
 
 // Header-only bypass on purpose: adding x-vercel-set-bypass-cookie makes Vercel
 // answer 307 (cookie-set redirect), which the redirect-less status check would
-// misread as non-200. The header alone passes every request.
+// misread as non-200. The header alone used to pass every request; since 2026-10-16 Vercel
+// may route it round vercel.com/sso-api first, which getStatus follows (see there).
 //
 // --header "Name: value" (repeatable) is the general form, for a site fronted by
 // something other than Vercel. The canonical case is a WAF/CDN in front of the LEGACY
@@ -570,6 +571,18 @@ function normalizeLocation(location, url) {
   }
 }
 
+/** Same origin and path (a trailing slash aside) and query. */
+function sameUrlIgnoringSlash(a, b) {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    const p = (u) => u.pathname.replace(/\/+$/, "") || "/";
+    return x.origin === y.origin && p(x) === p(y) && x.search === y.search;
+  } catch {
+    return false;
+  }
+}
+
 /** `{ status, location }` without following redirects; `location` only for a redirect. */
 async function getStatus(request, url) {
   if (isLocalhostHost(url)) {
@@ -580,6 +593,16 @@ async function getStatus(request, url) {
     const res = await request.get(url, { maxRedirects: 0, timeout: navTimeout, failOnStatusCode: false });
     const status = res.status();
     const location = status >= 300 && status < 400 ? normalizeLocation(res.headers()["location"], url) : undefined;
+    // Vercel's protection no longer always lets the bypass header straight through: since
+    // 2026-10-16 a header-only request may be sent round vercel.com/sso-api, which accepts the
+    // secret and bounces back to the same URL with a bypass cookie. Read redirect-less, every
+    // page of a protected deployment then looked like a 302 and none was captured. With a
+    // bypass secret configured, such a round trip is followed, and counts only if it ends on
+    // the URL that was asked for (an unaccepted secret ends on vercel.com/login instead).
+    if (bypassSecret && status >= 300 && status < 400 && /^https:\/\/vercel\.com\/sso-api\b/.test(String(res.headers()["location"] || ""))) {
+      const via = await request.get(url, { maxRedirects: 5, timeout: navTimeout, failOnStatusCode: false });
+      if (sameUrlIgnoringSlash(via.url(), url)) return { status: via.status(), location: undefined };
+    }
     if (!THROTTLE_STATUSES.has(status)) return { status, location };
     if (attempt >= THROTTLE_MAX_ATTEMPTS) {
       throttleExhausted++;
