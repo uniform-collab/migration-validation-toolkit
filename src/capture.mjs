@@ -594,13 +594,21 @@ async function getStatus(request, url) {
     const status = res.status();
     const location = status >= 300 && status < 400 ? normalizeLocation(res.headers()["location"], url) : undefined;
     // Vercel's protection no longer always lets the bypass header straight through: since
-    // 2026-10-16 a header-only request may be sent round vercel.com/sso-api, which accepts the
-    // secret and bounces back to the same URL with a bypass cookie. Read redirect-less, every
-    // page of a protected deployment then looked like a 302 and none was captured. With a
-    // bypass secret configured, such a round trip is followed, and counts only if it ends on
-    // the URL that was asked for (an unaccepted secret ends on vercel.com/login instead).
+    // 2026-10-16 a header-only request may be redirected to vercel.com/sso-api and on to the
+    // vercel.com login - the header alone is NOT accepted there. What still works is the
+    // documented cookie form: the same request with x-vercel-set-bypass-cookie answers 307 with a
+    // bypass cookie and lands on the page. The cookie goes into this context's jar, which the
+    // browser pages share, so it is set once and every later request passes. Read redirect-less,
+    // every page of the protected deployment had looked like a 302 and none was captured (WSP
+    // distributed e2e wsp-12 and wsp-14, 65 of 65 pages). It counts only if it ends on the URL
+    // that was asked for; a wrong secret still ends on the login page and is recorded as the 302.
     if (bypassSecret && status >= 300 && status < 400 && /^https:\/\/vercel\.com\/sso-api\b/.test(String(res.headers()["location"] || ""))) {
-      const via = await request.get(url, { maxRedirects: 5, timeout: navTimeout, failOnStatusCode: false });
+      const via = await request.get(url, {
+        maxRedirects: 5,
+        timeout: navTimeout,
+        failOnStatusCode: false,
+        headers: { "x-vercel-protection-bypass": bypassSecret, "x-vercel-set-bypass-cookie": "true" },
+      });
       if (sameUrlIgnoringSlash(via.url(), url)) return { status: via.status(), location: undefined };
     }
     if (!THROTTLE_STATUSES.has(status)) return { status, location };
