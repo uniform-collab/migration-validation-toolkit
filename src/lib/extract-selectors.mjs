@@ -103,7 +103,15 @@ export function collectComponentTexts(cfg) {
     const b = rn[0];
     // Different line boxes (wrap, or a block-ish sibling): innerText already breaks there
     // on both sides, but a space keeps the words apart in the flattened text.
-    const sameLine = Math.abs(b.top - a.top) < Math.max(1, Math.min(a.height, b.height) * 0.5);
+    // Same line when the boxes share most of their height - not when their tops agree: a
+    // raised <sup> beside a lowered <sub> (`<sub>Mm</sub><sup>3</sup><sub>/y</sub>`, Lexical's
+    // flat form of prod's `<sub>Mm<sup>3</sup>/y</sub>`) has tops a half-line apart on one line.
+    // Measured in Chromium at 16px: that pair overlaps 4.5 of 15px (0.30); a real wrap at
+    // line-height 1.0 overlaps 1 of 17px (0.06), and at any looser line height not at all.
+    const overlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    const sameLine =
+      Math.abs(b.top - a.top) < Math.max(1, Math.min(a.height, b.height) * 0.5) ||
+      overlap > Math.min(a.height, b.height) * 0.2;
     if (!sameLine) return true;
     return b.left - a.right > MIN_VISUAL_GAP_PX;
   }
