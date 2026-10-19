@@ -98,6 +98,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--preview-secret <s>` / `--preview-authenticated` | Render access-gated pages via the frontend's preview escape hatch. |
 | `--shot-idle-quiet` / `--shot-idle-max` / `--shot-component-idle-max` | Network-idle gate (ms; `0` disables). |
 | `--shot-stable-poll` / `--shot-stable-max` | Layout-stability gate (ms; `0` disables). |
+| `--shot-settle-quiet` / `--shot-settle-max` | Page-settled gate, once per page before the shots: web fonts, images still loading, then the page height unchanged for the quiet time (ms; defaults 500 / 5000; `--shot-settle-max 0` disables). A page whose budget ran out carries `pageSettle` in its marker. |
 | `--shot-stitch 0` | Fall back to `elementHandle.screenshot()` instead of tile+stitch. |
 | `--full-page-shot false` / `--full-page-max-height <px>` / `--full-page-quality <1-100>` | The per-page full-page JPEG (on by default whenever shots are; clipped at 16000 px, quality 70). Never scored — see [Full-page shot](#full-page-shot-not-scored). |
 

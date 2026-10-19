@@ -216,6 +216,15 @@ const shotCompIdleMax = Math.max(0, parseInt(args["shot-component-idle-max"] ?? 
 // page is already still; 0 disables the gate AND its post-shot verification.
 const shotStablePoll = Math.max(0, parseInt(args["shot-stable-poll"] ?? "50", 10) || 0);
 const shotStableMax = Math.max(0, parseInt(args["shot-stable-max"] ?? "2000", 10) || 0);
+// Page-settled gate for the shot pass: once, after the network-idle gate and before the
+// animation freeze, wait for the web fonts, for every image that is still loading, and then for
+// the page height to stay put for --shot-settle-quiet ms. The per-element gate above only waits
+// --shot-stable-max for ONE element, so a late font swap or an image without fixed dimensions
+// that lands while the page is being shot moved elements under it ("unstable layout") - more
+// often the busier the server, which made the concurrency tuner back off. One budget covers all
+// three waits; 0 for --shot-settle-max disables the gate.
+const shotSettleQuiet = Math.max(0, parseInt(args["shot-settle-quiet"] ?? "500", 10) || 0);
+const shotSettleMax = Math.max(0, parseInt(args["shot-settle-max"] ?? "5000", 10) || 0);
 // Capture mechanism. Stitching walks the element past the viewport a band at a time and
 // composites the viewport rasters, instead of handing CDP one oversized clip - see
 // captureStitched in lib/screenshot.mjs for why that path is worth avoiding. Output
@@ -821,6 +830,12 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
       if (shotIdleQuiet > 0 && shotIdleMax > 0 && quiescer) {
         await quiescer.idle(shotIdleQuiet, shotIdleMax);
       }
+      // Before freezeAnimations: it stubs setTimeout, which the settle wait itself needs.
+      if (shotSettleMax > 0) {
+        const settle = await waitPageSettled(page, shotSettleQuiet, shotSettleMax);
+        // Recorded only when the budget ran out, so the page marker says why its shots may move.
+        if (settle && !settle.settled) rec.pageSettle = settle;
+      }
       await freezeAnimations(page);
       await removeOverlayElements(page, overlaySelectors);
     }
@@ -830,6 +845,51 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
     quiescer?.detach();
     await page.close();
   }
+}
+
+/**
+ * Waits, within one budget of `maxMs`, for the page's web fonts, for every <img> still loading,
+ * and then for the document height to stay unchanged for `quietMs`. Returns what it saw;
+ * `settled` is false when the budget ran out first. Never throws: a page that cannot be measured
+ * is shot as before.
+ */
+async function waitPageSettled(page, quietMs, maxMs) {
+  return page.evaluate(async ({ quietMs, maxMs }) => {
+    const t0 = performance.now();
+    const left = () => Math.max(0, maxMs - (performance.now() - t0));
+    const capped = (p) => Promise.race([p, new Promise((r) => setTimeout(r, left()))]);
+    try { if (document.fonts?.ready) await capped(document.fonts.ready); } catch {}
+    // Only images the browser is fetching now: rendered, and either eager or a lazy one within a
+    // viewport of the current scroll position. A lazy image in a hidden carousel slide never
+    // starts, and waiting for it would spend the whole budget on every page.
+    const pending = (i) => {
+      if (i.complete) return false;
+      const r = i.getBoundingClientRect();
+      if (!r.width && !r.height && !i.offsetParent) return false;
+      if (i.loading !== "lazy") return true;
+      return r.bottom > -innerHeight && r.top < 2 * innerHeight;
+    };
+    const loading = [...document.images].filter(pending);
+    if (loading.length) {
+      await capped(Promise.all(loading.map((i) => new Promise((r) => {
+        i.addEventListener("load", r, { once: true });
+        i.addEventListener("error", r, { once: true });
+      }))));
+    }
+    const height = () => Math.max(document.body?.scrollHeight || 0, document.documentElement.scrollHeight);
+    let h = height();
+    let since = performance.now();
+    while (left() > 0 && performance.now() - since < quietMs) {
+      await new Promise((r) => setTimeout(r, 100));
+      const now = height();
+      if (now !== h) { h = now; since = performance.now(); }
+    }
+    return {
+      settled: performance.now() - since >= quietMs,
+      ms: Math.round(performance.now() - t0),
+      imagesLoading: [...document.images].filter(pending).length,
+    };
+  }, { quietMs, maxMs }).catch(() => null);
 }
 
 /**
@@ -1069,6 +1129,8 @@ async function runWorker(release) {
     const signals = {};
     const degraded = new Set();
     const pageStarted = Date.now();
+    // Every status a retry was spent on. Whether that was load can only be told afterwards.
+    const retriedStatuses = [];
     for (let attempt = 1; ; attempt++) {
       try {
         rec = await capturePage(context, pagePath, statusOnly, signals);
@@ -1105,6 +1167,7 @@ async function runWorker(release) {
         const worthOneRetry = looksTransient && prodStatus === 200 && attempt < 2;
         if (args["paths"] && looksTransient && (worthOneRetry || (!noRetry && attempt < 3))) {
           degraded.add("transient status");
+          retriedStatuses.push(rec.status);
           console.warn(`  status ${rec.status} on ${pagePath} - retrying in 10s`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
@@ -1127,6 +1190,12 @@ async function runWorker(release) {
     if (doContent) writeJson(markerPath(outDir, pagePath), rec);
     if (doShots) writeJson(markerPath(shotsOut, pagePath), rec);
     done++;
+    // A status every attempt returned alike (a real 404) is the page's answer, not a busy server:
+    // the retries could not change it, so it must not make the tuner back off. A retry that came
+    // back different - most of all a 200 - was transient, and stays a load signal.
+    if (retriedStatuses.length && rec && retriedStatuses.every((s) => s === rec.status)) {
+      degraded.delete("transient status");
+    }
     if (tuner) {
       if (signals.navTimeout) degraded.add("nav timeout");
       if (rec.shotsUnstable) degraded.add("unstable layout");
