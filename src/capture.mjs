@@ -1046,7 +1046,13 @@ console.log(
     `${outDir ? ` -> ${outDir}` : ""}${shotsOut ? ` + ${shotsOut}` : ""}`
 );
 
-const browser = await chromium.launch();
+// --browsers N: N Chromium instances, each new worker on the least loaded one. One browser funnels
+// every page through its own main thread and one GPU compositor (VizCompositor), which top out at
+// ~80 pages while the rest of the machine idles; N browsers split both N ways. Default 1.
+const browserCount = Math.max(1, parseInt(args["browsers"] || "1", 10) || 1);
+const browsers = await Promise.all(Array.from({ length: browserCount }, () => chromium.launch()));
+const browserLoad = browsers.map(() => 0);
+if (browserCount > 1) console.log(`Browsers: ${browserCount} (workers spread over them)`);
 let done = 0;
 let failed = 0;
 let non200 = 0;
@@ -1079,6 +1085,17 @@ async function worker() {
 }
 
 async function runWorker(release) {
+  let bi = 0;
+  for (let i = 1; i < browsers.length; i++) if (browserLoad[i] < browserLoad[bi]) bi = i;
+  browserLoad[bi]++;
+  try {
+    await runWorkerOn(browsers[bi], release);
+  } finally {
+    browserLoad[bi]--;
+  }
+}
+
+async function runWorkerOn(browser, release) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
     serviceWorkers: "block",
@@ -1231,7 +1248,7 @@ const controller = tuner
 while (running.length) await Promise.all(running.splice(0));
 if (controller) clearInterval(controller);
 if (tuner) console.log(tuner.summary());
-await browser.close();
+await Promise.all(browsers.map((b) => b.close()));
 
 // Aggregate per-page markers into a manifest, once per active output dir.
 //
