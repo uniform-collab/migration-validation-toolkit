@@ -57,6 +57,8 @@ import {
   failedPagePaths,
   makePathExcluder,
   makePathIncluder,
+  pageAvailability,
+  formatAvailability,
 } from "./lib/util.mjs";
 import { parseExcludedComponents } from "./lib/index-json.mjs";
 
@@ -383,6 +385,15 @@ const candidatePaths = Object.entries(prodManifest.pages)
   .map(([p]) => p)
   .sort();
 
+// A page the stage answers 404 is not on stage: counted here, not scored (it would
+// otherwise read as every component missing-in-migrated) - same rule as compare.mjs.
+const availability = pageAvailability(
+  prodManifest.pages,
+  migManifest.pages,
+  (p) => !excludePaths.has(p) && (!failedSet || failedSet.has(p)) && includePaths.has(p)
+);
+const notFoundOnStage = new Set(availability.notFound);
+
 const excluded = [];
 const noComponents = [];
 const pages = [];
@@ -391,6 +402,7 @@ for (const pagePath of candidatePaths) {
     excluded.push(pagePath);
     continue;
   }
+  if (notFoundOnStage.has(pagePath)) continue;
   const scored = await scorePage(pagePath);
   if (scored === null) {
     noComponents.push(pagePath);
@@ -469,6 +481,12 @@ if (failedSet) {
 lines.push("");
 lines.push(`## Overall visual score${failedSet ? " (failed-only subset)" : ""}: ${fmt(overall)}%`);
 lines.push("");
+lines.push(`## Pages on stage (not 404): ${formatAvailability(availability)}`);
+lines.push("");
+if (availability.notFound.length) {
+  lines.push(`${availability.notFound.length} in-scope page(s) answer 404 on stage — not on stage, so not scored (listed in report-screenshots.json \`notFoundOnStage\`).`);
+  lines.push("");
+}
 lines.push(
   `${comparedComponents.length} of ${totalComponents} component screenshots compared, ${allDiffs.length} differ (${zeroComponents} score 0), ${perfectPages} pages at 100%, ${redirectMismatches.length} redirect-parity mismatches.`
 );
@@ -618,6 +636,10 @@ writeJson(path.join(reportDir, "report-screenshots.json"), {
   overallScore: overall,
   failedOnly: failedSet ? { count: failedSet.size } : undefined,
   pagesScored: pages.length,
+  pagesInScope: availability.inScope,
+  pagesAvailable: availability.available,
+  pagesByLocale: availability.byLocale,
+  notFoundOnStage: availability.notFound,
   pagesPerfect: perfectPages,
   // componentsCompared counts only pairs that produced a score; the two
   // not-compared buckets are reported alongside it, never folded into it.
@@ -637,6 +659,7 @@ writeJson(path.join(reportDir, "report-screenshots.json"), {
 });
 
 /* ---------- stdout summary ---------- */
+console.log(`Pages on stage (not 404): ${formatAvailability(availability)}`);
 console.log(
   `Overall visual score: ${fmt(overall)}% over ${pages.length} pages (${comparedComponents.length}/${totalComponents} components compared, ${allDiffs.length} diffs, ${zeroComponents} scoring 0, ${perfectPages} pages at 100%)`
 );

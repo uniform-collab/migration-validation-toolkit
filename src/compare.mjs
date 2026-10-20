@@ -24,9 +24,12 @@
  *                   max(prodLen, stageLen) — so a page's score tracks the
  *                   fraction of its TEXT that matches, not of its elements; an
  *                   unmatched element scores 0 and weighs its present side's
- *                   length (stage non-200 => 0)
+ *                   length (stage non-200 => 0, except 404 - see below)
  *   status parity = a prod-non-200 page whose stage status differs (e.g. prod
  *                   404 -> stage 200) scores 0; matching pages reported only
+ *   stage 404     = a page prod serves and the stage answers 404 is NOT scored:
+ *                   it is a page the migration does not have, a coverage gap, and
+ *                   is counted in `pagesAvailable` / `pagesInScope` instead
  *   overall       = mean of page scores across prod-200 pages + parity misses
  *   --exclude     = comma-separated paths deliberately not migrated; reported
  *                   separately, not scored
@@ -63,6 +66,8 @@ import {
   failedPagePaths,
   makePathExcluder,
   makePathIncluder,
+  pageAvailability,
+  formatAvailability,
   parseLinkTargetRewrites,
   setLinkTargetRewrites,
 } from "./lib/util.mjs";
@@ -260,7 +265,17 @@ const prodNon200 = Object.entries(expected.pages)
       mismatch: actualRec ? !statusParity(rec, actualRec) : false,
     };
   });
-const statusMismatches = prodNon200.filter((p) => p.mismatch);
+// Coverage: in-scope pages prod serves vs those the stage does not 404. A stage 404
+// leaves the score (see the header) — this counter is where it shows instead.
+const availability = pageAvailability(
+  expected.pages,
+  actual.pages,
+  (p) => !excludePaths.has(p) && inScope(p)
+);
+const notFoundOnStage = new Set(availability.notFound);
+// A parity miss the stage answers 404 is the same coverage gap (prod 301 -> stage
+// 404 is a page the migration does not have), so it is counted, not scored either.
+const statusMismatches = prodNon200.filter((p) => p.mismatch && !notFoundOnStage.has(p.path));
 const notProbed = prodNon200.filter((p) => p.stageStatus === null);
 
 // Pages the stage could only render through the frontend's preview bypass (capture.mjs
@@ -303,6 +318,7 @@ for (const pagePath of prod200Paths) {
 
   if (actualRec.status !== 200) {
     stageNon200.push({ path: pagePath, status: actualRec.status, error: actualRec.error });
+    if (actualRec.status === 404) continue; // not on stage: counted in availability, not scored
     pages.push({
       path: pagePath,
       prodStatus: 200,
@@ -417,7 +433,9 @@ if (failedSet) {
 lines.push("");
 lines.push(`## Overall score${failedSet ? " (failed-only subset)" : ""}: ${fmt(overall)}%`);
 lines.push("");
-lines.push(`${totalElements} element pairs compared, ${diffElements.length} differ (${zeroElements} score 0), ${stageNon200.length} pages broken on stage, ${statusMismatches.length} status-parity mismatches.`);
+lines.push(`## Pages on stage (not 404): ${formatAvailability(availability)}`);
+lines.push("");
+lines.push(`${totalElements} element pairs compared, ${diffElements.length} differ (${zeroElements} score 0), ${stageNon200.filter((p) => p.status !== 404).length} pages broken on stage, ${availability.notFound.length} not on stage (404, not scored), ${statusMismatches.length} status-parity mismatches.`);
 lines.push("");
 
 // Regression diff vs the previous report (git history / --prev-report).
@@ -553,7 +571,9 @@ if (prodNon200.length) {
     const parity =
       p.stageStatus === null
         ? "not probed (stale actual dataset)"
-        : p.mismatch
+        : p.mismatch && notFoundOnStage.has(p.path)
+          ? "❌ not on stage (counted in Pages, not scored)"
+          : p.mismatch
           ? "❌ scored 0"
           : "✅";
     lines.push(`| ${prodCell} | ${stageCell} | ${parity} | ${p.path} |`);
@@ -563,7 +583,7 @@ if (prodNon200.length) {
 }
 lines.push("");
 
-lines.push(`## Stage pages not returning 200 (${stageNon200.length}) — these score 0`);
+lines.push(`## Stage pages not returning 200 (${stageNon200.length}) — these score 0, except a 404 (not on stage, not scored)`);
 lines.push("");
 if (stageNon200.length) {
   lines.push("| status | path |");
@@ -616,6 +636,12 @@ writeJson(path.join(reportDir, "report.json"), {
   overallScore: overall,
   failedOnly: failedSet ? { count: failedSet.size, source: prev.source } : undefined,
   pagesScored: pages.length,
+  // Coverage: in-scope pages prod serves, and how many of them the stage does not 404.
+  // The 404s are left out of overallScore and listed in notFoundOnStage.
+  pagesInScope: availability.inScope,
+  pagesAvailable: availability.available,
+  pagesByLocale: availability.byLocale,
+  notFoundOnStage: availability.notFound,
   elementsCompared: totalElements,
   elementsScoringZero: zeroElements,
   excluded,
@@ -737,6 +763,7 @@ writeJson(path.join(reportDir, "report.json"), {
 
 // ---------- stdout summary (lands in the z_stdout stage log) ----------
 console.log(`Overall score${failedSet ? " (FAILED-ONLY subset)" : ""}: ${fmt(overall)}% over ${pages.length} pages (${totalElements} element pairs, ${diffElements.length} diffs, ${zeroElements} scoring 0)`);
+console.log(`Pages on stage (not 404): ${formatAvailability(availability)}`);
 console.log(`Prod non-200: ${prodNon200.length}; stage non-200: ${stageNon200.length}; status-parity mismatches: ${statusMismatches.length}${notProbed.length ? ` (${notProbed.length} not probed)` : ""}`);
 if (comparison) {
   const c = comparison;

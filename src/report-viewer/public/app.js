@@ -406,6 +406,39 @@ function coverageWarning() {
     )}\\prod</span> first, or 6100 self-skips).</span></div>`;
 }
 
+/**
+ * The "Pages" counter: in-scope pages the stage serves (not 404) / in-scope pages, all
+ * languages. A stage 404 is not scored (it would drag content and visual to 0), so this
+ * is where it shows. A report without pagesInScope (older toolkit) shows the scored count.
+ */
+function pagesKpi(m, kpi) {
+  const r = m.content?.pagesInScope != null ? m.content : m.visual?.pagesInScope != null ? m.visual : null;
+  if (!r) {
+    return kpi(
+      "Pages",
+      int(m.content?.pagesScored ?? m.visual?.pagesScored),
+      `${int(m.visual?.pagesScored || 0)} with screenshots · ${int((m.content?.excluded || []).length)} excluded`
+    );
+  }
+  const missing = r.pagesInScope - r.pagesAvailable;
+  const locs = Object.entries(r.pagesByLocale || {}).sort(([a], [b]) => a.localeCompare(b));
+  const perLocale = locs.length > 1 || (locs.length === 1 && locs[0][0])
+    ? locs.map(([l, v]) => `${esc(l || "(no locale)")} ${int(v.available)}/${int(v.inScope)}`).join(" · ")
+    : "";
+  const sub = [
+    missing ? `<span class="s-bad">${int(missing)} 404 on stage (not scored)</span>` : "none 404 on stage",
+    perLocale,
+    `${int(m.content?.pagesScored ?? 0)} scored · ${int(m.visual?.pagesScored || 0)} with screenshots`,
+  ].filter(Boolean).join("<br>");
+  const pct = r.pagesInScope ? (100 * r.pagesAvailable) / r.pagesInScope : 100;
+  return kpi(
+    "Pages on stage (not 404)",
+    `<span class="s-${grade(pct)}">${int(r.pagesAvailable)}</span> <span class="of">/ ${int(r.pagesInScope)}</span>`,
+    sub,
+    "big"
+  );
+}
+
 function viewOverview() {
   const m = S.model;
   const cmp = m.content?.comparison;
@@ -438,13 +471,7 @@ function viewOverview() {
         : "run 6400 to produce it",
       "big"
     ),
-    kpi(
-      "Pages",
-      int(m.content?.pagesScored ?? m.visual?.pagesScored),
-      `${int(m.visual?.pagesScored || 0)} with screenshots · ${int(
-        (m.content?.excluded || []).length
-      )} excluded`
-    ),
+    pagesKpi(m, kpi),
     kpi(
       "Element diffs",
       int(pages.reduce((n, p) => n + p.contentDiffs, 0)),

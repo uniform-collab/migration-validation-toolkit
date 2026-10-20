@@ -5,7 +5,37 @@ import {
   ASSET_LINK_PLACEHOLDER,
   parseLinkTargetRewrites,
   setLinkTargetRewrites,
+  pageAvailability,
+  pageLocale,
+  failedPagePaths,
 } from "./util.mjs";
+
+test("pageAvailability: a stage 404 is counted, not scored; prod 404s are out of scope", () => {
+  const expected = {
+    "/en-gl/a": { status: 200 },
+    "/en-gl/b": { status: 200 },
+    "/en-cn/a": { status: 301 },
+    "/en-cn/gone": { status: 404 },
+    "/fr/x": { status: 200 },
+  };
+  const actual = {
+    "/en-gl/a": { status: 200 },
+    "/en-gl/b": { status: 404 },
+    "/en-cn/a": { status: 404 },
+    "/en-cn/gone": { status: 404 },
+    "/fr/x": { status: 500 },
+  };
+  const a = pageAvailability(expected, actual, (p) => p !== "/fr/x");
+  assert.equal(a.inScope, 3);
+  assert.equal(a.available, 1);
+  assert.deepEqual(a.notFound, ["/en-cn/a", "/en-gl/b"]);
+  assert.deepEqual(a.byLocale, { "en-gl": { inScope: 2, available: 1 }, "en-cn": { inScope: 1, available: 0 } });
+  assert.equal(pageLocale("/search"), "");
+  assert.deepEqual(
+    [...failedPagePaths({ pages: [{ path: "/a", score: 90 }], notFoundOnStage: ["/b"] })].sort(),
+    ["/a", "/b"]
+  );
+});
 
 const P = ASSET_LINK_PLACEHOLDER;
 const link = (target) => `[Download the flyer](${target})`;

@@ -474,6 +474,15 @@ score = 100 * LCS(prodText, stageText).length / max(prodText.length, stageText.l
   redirect with 308 where a legacy site sends 301), and the two `Location`s must agree after the
   `--link-target-rewrite` rules. A dataset captured before locations were recorded is judged by
   kind alone.
+- **A page the actual side answers 404 is not scored** — by the content report or the screenshot
+  report — while the expected side serves it (200, or a redirect: a parity miss that lands on a 404
+  counts here too). It is a page the migration does not have, a coverage gap rather than a quality
+  defect, and scoring it 0 buried every real diff under it (189 of 273 pages of one suite pulled the
+  content score to 5.5%). It is counted instead: both reports write `pagesInScope` (in-scope pages
+  the expected side does not 404), `pagesAvailable` (those the actual side does not 404),
+  `pagesByLocale` (the same per first-path-segment locale) and `notFoundOnStage` (the paths), and
+  the viewer shows `available / in scope` as a headline counter. Any other non-200 (a 500, a capture
+  error) is a broken page and still scores 0. `--only-failed` re-checks the 404 pages too.
 - **Overall score** = mean of page scores across scored expected-200 pages plus any status-parity
   mismatches. `--exclude` paths are reported but not scored.
 

@@ -370,7 +370,66 @@ export function failedPagePaths(report, excludePaths = new Set()) {
       set.add(p.path);
     }
   }
+  // Pages the stage answered 404 are not in `pages` (they are not scored, see
+  // pageAvailability) but they did fail, so a failed-only run re-checks them too.
+  for (const p of (report && report.notFoundOnStage) || []) {
+    const pagePath = typeof p === "string" ? p : p.path;
+    if (pagePath && !excludePaths.has(pagePath)) set.add(pagePath);
+  }
   return set;
+}
+
+/**
+ * The locale of a page path: its first segment when that looks like a language tag
+ * (`/en-gl/projects/x` -> `en-gl`), else "" (a site with no locale in its URLs).
+ */
+export function pageLocale(pagePath) {
+  const seg = String(pagePath || "").split("/").filter(Boolean)[0] || "";
+  return /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(seg) ? seg.toLowerCase() : "";
+}
+
+/**
+ * How many in-scope pages the stage actually serves. A page the stage answers 404
+ * is a page the migration does not have (yet) — a coverage question, not a quality
+ * one — so it is left out of the content and visual scores and counted here instead.
+ *
+ *   scope     = in-scope expected pages the PROD side serves (status not 404)
+ *   available = those the stage does not answer 404 (a 500 or a capture error is
+ *               a broken page and still scores 0; only a 404 means "not there")
+ *
+ * `expectedPages` / `actualPages` are manifest `pages` maps; `inScope(path)` decides
+ * scope (include list, exclude list, failed-only subset).
+ */
+export function pageAvailability(expectedPages, actualPages, inScope) {
+  const byLocale = {};
+  let inScopeCount = 0;
+  let available = 0;
+  const notFound = [];
+  for (const [p, rec] of Object.entries(expectedPages || {})) {
+    if (!rec || rec.status === 404 || !inScope(p)) continue;
+    const loc = pageLocale(p);
+    const row = (byLocale[loc] ||= { inScope: 0, available: 0 });
+    inScopeCount++;
+    row.inScope++;
+    const actualRec = actualPages ? actualPages[p] : undefined;
+    if (actualRec && actualRec.status === 404) {
+      notFound.push(p);
+    } else {
+      available++;
+      row.available++;
+    }
+  }
+  notFound.sort();
+  return { inScope: inScopeCount, available, notFound, byLocale };
+}
+
+/** "123 / 140 pages (en-gl 100 / 110 · en-cn 23 / 30)" for report headers and logs. */
+export function formatAvailability(a) {
+  const locs = Object.keys(a.byLocale).sort();
+  const parts = locs.length > 1 || (locs.length === 1 && locs[0])
+    ? ` (${locs.map((l) => `${l || "(no locale)"} ${a.byLocale[l].available} / ${a.byLocale[l].inScope}`).join(" · ")})`
+    : "";
+  return `${a.available} / ${a.inScope} pages${parts}`;
 }
 
 const DIFF_CONTEXT_WORDS = 12;
