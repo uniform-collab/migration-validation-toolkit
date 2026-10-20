@@ -36,6 +36,13 @@ export const SLOW_START_FACTOR = 1.5;
 export const BACKOFF_FACTOR = 0.75;
 export const CEILING_RELAX = 6;
 /**
+ * Windows at the start that are a cold server's, not the steady state's: a degradation there still cuts
+ * the level, but sets no ceiling and keeps the multiplicative slow-start. Measured on a 30-core box:
+ * the first 16 pages against eight freshly started frontend copies all timed out, the ceiling fell to
+ * 2, and relaxing it one step per CEILING_RELAX clean windows held a 100-wide capture at ~5 for hours.
+ */
+export const WARMUP_WINDOWS = 3;
+/**
  * Resident cost of one worker (a browser context with a heavy page open), measured on a WSP
  * capture: 8 workers held ~4.7 GB.
  */
@@ -68,6 +75,7 @@ export function initialState({ start, min = 1, max }) {
     baselineTarget: 0,
     awaitingVerdict: false,
     cleanStreak: 0,
+    windows: 0,
   };
 }
 
@@ -78,12 +86,14 @@ export function initialState({ start, min = 1, max }) {
 export function decide(prev, window) {
   const s = { ...prev };
   const current = s.target;
+  if (window.completed > 0 || window.degraded > 0) s.windows = (s.windows || 0) + 1;
 
   if (window.degraded > 0) {
+    const warmup = s.windows <= WARMUP_WINDOWS;
     const cut = Math.max(s.min, Math.min(current - 1, Math.floor(current * BACKOFF_FACTOR)));
-    s.ceiling = Math.max(s.min, current - 1);
+    if (!warmup) s.ceiling = Math.max(s.min, current - 1);
     s.target = Math.min(cut, s.ceiling);
-    s.phase = "climb";
+    s.phase = warmup ? "slow-start" : "climb";
     s.direction = 1;
     s.baselineScore = -1;
     s.awaitingVerdict = false;
@@ -94,7 +104,8 @@ export function decide(prev, window) {
       note:
         s.target === current
           ? `${current}: ${window.degraded} degraded page(s)${why} - already at the minimum, holding`
-          : `${current}: ${window.degraded} degraded page(s)${why} - backing off to ${s.target}, ceiling ${s.ceiling}`,
+          : `${current}: ${window.degraded} degraded page(s)${why} - backing off to ${s.target}` +
+            (warmup ? " (warm-up: no ceiling)" : `, ceiling ${s.ceiling}`),
     };
   }
 

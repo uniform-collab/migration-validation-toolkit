@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { initialState, decide } from "./autotune.mjs";
+import { initialState, decide, WARMUP_WINDOWS } from "./autotune.mjs";
 
 const clean = (completed, seconds = 10) => ({ seconds, completed, degraded: 0 });
 const bad = (completed = 5) => ({ seconds: 10, completed, degraded: 1, reasons: ["1 nav-timeout"] });
@@ -36,7 +36,7 @@ test("hill climb reverses after a step that did not help", () => {
 });
 
 test("a degraded window backs off and caps the climb below the level that hurt", () => {
-  let s = { ...initialState({ start: 12, max: 32 }), phase: "climb" };
+  let s = { ...initialState({ start: 12, max: 32 }), phase: "climb", windows: WARMUP_WINDOWS };
   ({ state: s } = decide(s, bad()));
   assert.equal(s.target, 9);
   assert.equal(s.ceiling, 11);
@@ -46,11 +46,25 @@ test("a degraded window backs off and caps the climb below the level that hurt",
 });
 
 test("the ceiling relaxes after enough clean windows", () => {
-  let s = { ...initialState({ start: 8, max: 32 }), phase: "climb" };
+  let s = { ...initialState({ start: 8, max: 32 }), phase: "climb", windows: WARMUP_WINDOWS };
   ({ state: s } = decide(s, bad()));
   const capped = s.ceiling;
   for (let i = 0; i < 6; i++) ({ state: s } = decide(s, clean(10)));
   assert.equal(s.ceiling, capped + 1);
+});
+
+test("a degraded warm-up window cuts the level but sets no ceiling and keeps the slow start", () => {
+  let s = initialState({ start: 16, max: 100 });
+  ({ state: s } = decide(s, bad())); // a cold server's first window
+  assert.equal(s.target, 12);
+  assert.equal(s.ceiling, 100);
+  assert.equal(s.phase, "slow-start");
+  ({ state: s } = decide(s, clean(10))); // baseline at 12, slow start proposes x1.5
+  assert.equal(s.target, 18);
+  // Past the warm-up the old rule holds: a degraded window caps the climb.
+  s = { ...s, windows: WARMUP_WINDOWS };
+  ({ state: s } = decide(s, bad()));
+  assert.equal(s.ceiling, 17);
 });
 
 test("never goes below min or above max, and holds on an empty window", () => {
