@@ -1126,6 +1126,9 @@ let failed = 0;
 let non200 = 0;
 let bypassed = 0;
 const queue = shardFeed ? [] : [...items];
+/** Pages that threw under --no-retry, for the end pass (see the catch in runWorkerOn). */
+const deferredItems = [];
+const END_PASS_CONCURRENCY = 4;
 // Fed from the parent (--shard-feed): one request at a time, for as many pages as workers wait.
 let feedDone = !shardFeed;
 let feedPending = null;
@@ -1240,6 +1243,7 @@ async function runWorkerOn(browser, release) {
     }
 
     let rec;
+    let deferredNow = false;
     // Load symptoms for the tuner. A zero-capture retry is deliberately not one: a page that
     // genuinely has no components would otherwise hold the pool down for the whole run.
     const signals = {};
@@ -1293,6 +1297,16 @@ async function runWorkerOn(browser, release) {
         degraded.add("exception");
         const maxAttempts = noRetry ? 1 : args["paths"] ? 3 : 2;
         if (attempt >= maxAttempts) {
+          // --no-retry: a page that threw (a timeout, mostly) gets one more try at the END, at low
+          // concurrency, instead of none - under a wide capture a burst of heavy pages times out
+          // pages that load in a second on their own (23 of 4,123 on one WSP run, each a lost page).
+          if (noRetry && !item.deferred) {
+            item.deferred = String(err.message || err).slice(0, 120);
+            deferredItems.push(item);
+            deferredNow = true;
+            rec = undefined;
+            break;
+          }
           rec = { status: 0, error: String(err.message || err).slice(0, 300) };
           failed++;
           break;
@@ -1300,6 +1314,13 @@ async function runWorkerOn(browser, release) {
         console.warn(`  retrying ${pagePath}: ${err.message}`);
         await new Promise((r) => setTimeout(r, attempt * 5000));
       }
+    }
+
+    if (deferredNow) {
+      // Deferred to the end pass: no marker yet, but the timeout is still a load signal.
+      if (tuner) tuner.record([...degraded], false);
+      console.warn(`  ${pagePath}: ${item.deferred} - deferred to the end`);
+      continue;
     }
 
     // Write the page marker into each active output dir.
@@ -1346,6 +1367,14 @@ const controller = tuner && !shardParent
 // The pool can grow while we wait, so drain until no worker is left.
 while (running.length) await Promise.all(running.splice(0));
 if (controller) clearInterval(controller);
+// The end pass: pages deferred under --no-retry, a few at a time on a now quiet server. A page that
+// fails here too is a hard failure as before.
+if (deferredItems.length && !shardParent) {
+  const atOnce = Math.min(END_PASS_CONCURRENCY, deferredItems.length);
+  console.log(`Retrying ${deferredItems.length} page(s) that failed under load, ${atOnce} at a time...`);
+  queue.push(...deferredItems.splice(0));
+  await Promise.all(Array.from({ length: atOnce }, () => worker()));
+}
 if (tuner && !shardParent) console.log(tuner.summary());
 await Promise.all(browsers.map((b) => b.close()));
 
