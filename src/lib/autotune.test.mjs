@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { initialState, decide, WARMUP_WINDOWS } from "./autotune.mjs";
+import { initialState, decide, WARMUP_WINDOWS, WARMUP_MS } from "./autotune.mjs";
 
 const clean = (completed, seconds = 10) => ({ seconds, completed, degraded: 0 });
 const bad = (completed = 5) => ({ seconds: 10, completed, degraded: 1, reasons: ["1 nav-timeout"] });
@@ -108,4 +108,12 @@ test("a kind seen above the minimum still backs off", () => {
   assert.equal(s.target, 6);
   assert.equal(s.ceiling, 7);
   assert.equal(s.ignored, undefined);
+});
+test("warm-up also lasts WARMUP_MS: a degraded window inside it sets no ceiling", () => {
+  let s = { ...initialState({ start: 8, max: 60 }), windows: WARMUP_WINDOWS + 5 };
+  ({ state: s } = decide(s, { ...bad(), sinceStart: WARMUP_MS - 1 }));
+  assert.equal(s.ceiling, 60);
+  assert.equal(s.phase, "slow-start");
+  ({ state: s } = decide(s, { ...bad(), sinceStart: WARMUP_MS + 1 }));
+  assert.ok(s.ceiling < 60);
 });

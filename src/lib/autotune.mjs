@@ -43,6 +43,12 @@ export const CEILING_RELAX = 6;
  */
 export const WARMUP_WINDOWS = 3;
 /**
+ * ...and at least this long from the start. A degraded window closes at once, so three windows can
+ * pass in seconds: on eight cold frontend copies whose first renders of two listing pages took
+ * 11-14 s each, the warm-up was over before the copies were warm and the ceiling fell to 1.
+ */
+export const WARMUP_MS = 240_000;
+/**
  * Resident cost of one worker (a browser context with a heavy page open), measured on a WSP
  * capture: 8 workers held ~4.7 GB.
  */
@@ -116,7 +122,8 @@ export function decide(prev, window) {
   }
 
   if (window.degraded > 0) {
-    const warmup = s.windows <= WARMUP_WINDOWS;
+    // `window.sinceStart` (ms since the tuner started) is optional: without it, windows alone decide.
+    const warmup = s.windows <= WARMUP_WINDOWS || (window.sinceStart !== undefined && window.sinceStart < WARMUP_MS);
     const cut = Math.max(s.min, Math.min(current - 1, Math.floor(current * BACKOFF_FACTOR)));
     if (!warmup) s.ceiling = Math.max(s.min, current - 1);
     s.target = Math.min(cut, s.ceiling);
@@ -211,6 +218,7 @@ export class ConcurrencyTuner {
     this.intervalMs = intervalMs;
     this.log = log;
     this.windowStart = Date.now();
+    this.startedAt = this.windowStart;
     this.completed = 0;
     this.units = 0;
     this.busyMs = 0;
@@ -274,6 +282,7 @@ export class ConcurrencyTuner {
       degraded: this.degraded + (memLow ? 1 : 0),
       reasons,
       kinds,
+      sinceStart: now - this.startedAt,
       score,
       unit: this.busyMs > 0 ? "components/s" : "pages/s",
     };
