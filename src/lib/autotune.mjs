@@ -62,6 +62,15 @@ export const LOW_MEMORY_FRACTION = 0.08;
  * than this, so the tuner stays as careful there as before.
  */
 export const TOLERATED_FRACTION = 0.05;
+/**
+ * Kinds a page shows by itself as often as under load (a carousel that never settles). Such a kind
+ * seen at CONTENT_LEVEL_FRACTION of the best level that ran clean, or below, is the page's: after a
+ * real overload on heavy pages backed a WSP capture off from 60, single unstable layouts at 13, 9
+ * and 6 cut it on down to 4 - at a low level one page is always more than the tolerated share.
+ * Timeouts, errors and throttling are not in it: those keep counting, so an overload still answers.
+ */
+export const CONTENT_PRONE_KINDS = new Set(["unstable layout"]);
+export const CONTENT_LEVEL_FRACTION = 0.25;
 /** Degradation kinds that always count, even when they show at the minimum level. */
 export const PERSISTENT_KINDS = new Set(["host memory low"]);
 
@@ -111,7 +120,13 @@ export function decide(prev, window) {
   if (window.degraded > 0 && window.kinds) {
     const ignored = new Set(s.ignored || []);
     const kinds = Object.keys(window.kinds).filter((k) => !ignored.has(k));
-    const fresh = current <= s.min ? kinds.filter((k) => !PERSISTENT_KINDS.has(k)) : [];
+    const farBelowClean = (s.bestClean || 0) > 0 && current <= s.bestClean * CONTENT_LEVEL_FRACTION;
+    const fresh =
+      current <= s.min
+        ? kinds.filter((k) => !PERSISTENT_KINDS.has(k))
+        : farBelowClean
+          ? kinds.filter((k) => CONTENT_PRONE_KINDS.has(k))
+          : [];
     if (fresh.length) {
       s.ignored = [...ignored, ...fresh];
       s.ceiling = s.max;
@@ -122,7 +137,9 @@ export function decide(prev, window) {
       s.cleanStreak = 0;
       return {
         state: s,
-        note: `${current}: ${fresh.join(", ")} at the minimum level - the pages' own, not load: no longer a degradation signal, ceiling lifted`,
+        note:
+          `${current}: ${fresh.join(", ")} ${current <= s.min ? "at the minimum level" : `at ${current}, a quarter of the ${s.bestClean} that ran clean`}` +
+          ` - the pages' own, not load: no longer a degradation signal, ceiling lifted`,
       };
     }
     if (!kinds.length) window = { ...window, degraded: 0 };
@@ -155,6 +172,8 @@ export function decide(prev, window) {
 
   if (window.completed === 0) return { state: s, note: null };
 
+  // The widest level that ran a clean window (see CONTENT_PRONE_KINDS).
+  s.bestClean = Math.max(s.bestClean || 0, current);
   s.cleanStreak++;
   if (s.ceiling < s.max && s.cleanStreak >= CEILING_RELAX) {
     s.ceiling++;

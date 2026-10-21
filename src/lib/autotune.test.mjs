@@ -140,3 +140,16 @@ test("a window with one degraded page waits for a full sample before it is judge
   assert.equal(t.state.ceiling, 60);
   assert.ok(!lines.some((l) => /backing off/.test(l)));
 });
+test("an unstable layout far below a level that ran clean is the page's; a timeout there still counts", () => {
+  const w = (kind) => ({ seconds: 20, completed: 12, degraded: 2, reasons: [`2 ${kind}`], kinds: { [kind]: 2 }, sinceStart: 900000 });
+  let s = { ...initialState({ start: 13, max: 60 }), windows: WARMUP_WINDOWS + 1, bestClean: 60, ceiling: 12, phase: "climb" };
+  let note;
+  ({ state: s, note } = decide(s, w("unstable layout")));
+  assert.deepEqual(s.ignored, ["unstable layout"]);
+  assert.equal(s.ceiling, 60);
+  assert.match(note, /a quarter of the 60/);
+  let t = { ...initialState({ start: 13, max: 60 }), windows: WARMUP_WINDOWS + 1, bestClean: 60, phase: "climb" };
+  ({ state: t } = decide(t, w("nav timeout")));
+  assert.equal(t.ignored, undefined);
+  assert.ok(t.target < 13);
+});
