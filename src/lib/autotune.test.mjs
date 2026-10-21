@@ -78,3 +78,34 @@ test("never goes below min or above max, and holds on an empty window", () => {
   ({ state: s } = decide(s, clean(10)));
   assert.ok(s.target >= 1 && s.target <= 2);
 });
+
+
+test("a kind seen at the minimum level stops counting and lifts the ceiling", () => {
+  const layout = (completed = 2) => ({ seconds: 20, completed, degraded: 1, reasons: ["1 unstable layout"], kinds: { "unstable layout": 1 } });
+  let s = { ...initialState({ start: 1, max: 60 }), windows: WARMUP_WINDOWS, ceiling: 1 };
+  let note;
+  ({ state: s, note } = decide(s, layout())); // at the minimum: the pages' own
+  assert.deepEqual(s.ignored, ["unstable layout"]);
+  assert.equal(s.ceiling, 60);
+  assert.match(note, /no longer a degradation signal/);
+  ({ state: s } = decide(s, clean(4, 20))); // baseline at 1 -> slow start
+  assert.equal(s.target, 2);
+  ({ state: s } = decide(s, layout(8))); // the ignored kind alone is a clean window: better -> keep, grow
+  assert.equal(s.ceiling, 60);
+  assert.equal(s.target, 3);
+});
+
+test("host memory low counts even at the minimum level", () => {
+  let s = { ...initialState({ start: 1, max: 60 }), windows: WARMUP_WINDOWS };
+  ({ state: s } = decide(s, { seconds: 20, completed: 2, degraded: 1, reasons: ["host memory low"], kinds: { "host memory low": 1 } }));
+  assert.equal(s.ignored, undefined);
+  assert.equal(s.target, 1);
+});
+
+test("a kind seen above the minimum still backs off", () => {
+  let s = { ...initialState({ start: 8, max: 60 }), windows: WARMUP_WINDOWS };
+  ({ state: s } = decide(s, { seconds: 20, completed: 2, degraded: 1, reasons: ["1 unstable layout"], kinds: { "unstable layout": 1 } }));
+  assert.equal(s.target, 6);
+  assert.equal(s.ceiling, 7);
+  assert.equal(s.ignored, undefined);
+});

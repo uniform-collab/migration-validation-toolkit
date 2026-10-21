@@ -49,6 +49,8 @@ export const WARMUP_WINDOWS = 3;
 export const CONTEXT_MEMORY_BYTES = 600 * 1024 * 1024;
 /** Free host memory below this fraction of total counts as a degradation signal. */
 export const LOW_MEMORY_FRACTION = 0.08;
+/** Degradation kinds that always count, even when they show at the minimum level. */
+export const PERSISTENT_KINDS = new Set(["host memory low"]);
 
 /**
  * Upper bound when --concurrency-max is not given: CPU- or memory-bound, whichever is lower.
@@ -87,6 +89,31 @@ export function decide(prev, window) {
   const s = { ...prev };
   const current = s.target;
   if (window.completed > 0 || window.degraded > 0) s.windows = (s.windows || 0) + 1;
+
+  // A signal that shows at the minimum level is the pages' own, not the load's: a carousel that never
+  // settles, a page that always throws. Measured on a WSP capture: hub pages showed 'unstable layout'
+  // at 1, and treating it as a verdict on the level held a 60-wide capture at 1-3. Such a kind stops
+  // counting from then on (the pages still record it), and the ceilings it set are lifted.
+  // `window.kinds` = { <kind>: <pages> }; a caller that does not pass it keeps the old behaviour.
+  if (window.degraded > 0 && window.kinds) {
+    const ignored = new Set(s.ignored || []);
+    const kinds = Object.keys(window.kinds).filter((k) => !ignored.has(k));
+    const fresh = current <= s.min ? kinds.filter((k) => !PERSISTENT_KINDS.has(k)) : [];
+    if (fresh.length) {
+      s.ignored = [...ignored, ...fresh];
+      s.ceiling = s.max;
+      s.phase = "slow-start";
+      s.direction = 1;
+      s.baselineScore = -1;
+      s.awaitingVerdict = false;
+      s.cleanStreak = 0;
+      return {
+        state: s,
+        note: `${current}: ${fresh.join(", ")} at the minimum level - the pages' own, not load: no longer a degradation signal, ceiling lifted`,
+      };
+    }
+    if (!kinds.length) window = { ...window, degraded: 0 };
+  }
 
   if (window.degraded > 0) {
     const warmup = s.windows <= WARMUP_WINDOWS;
@@ -228,7 +255,11 @@ export class ConcurrencyTuner {
       return this.state.target;
     }
     const reasons = [...this.reasons].map(([r, n]) => `${n} ${r}`);
-    if (memLow) reasons.push("host memory low");
+    const kinds = Object.fromEntries(this.reasons);
+    if (memLow) {
+      reasons.push("host memory low");
+      kinds["host memory low"] = 1;
+    }
     // Throughput by Little's law - workers x work per busy-second - rather than completions per
     // window: pages differ several-fold in component count, and a window holds only a handful of
     // them, so a count of completions measured the page mix and its own rounding more than the
@@ -242,6 +273,7 @@ export class ConcurrencyTuner {
       completed: this.completed,
       degraded: this.degraded + (memLow ? 1 : 0),
       reasons,
+      kinds,
       score,
       unit: this.busyMs > 0 ? "components/s" : "pages/s",
     };
