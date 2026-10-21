@@ -1080,9 +1080,12 @@ if (shardParent) {
   console.log(`Shards: ${shardCount} capture processes (per process: ${Object.entries(perChild).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ")})`);
   const { spawn } = await import("node:child_process");
   const readline = await import("node:readline");
+  // This module itself, not process.argv[1]: started through bin/cli.mjs, argv[1] is the dispatcher,
+  // which has already removed the command word these flags follow.
+  const selfPath = (await import("node:url")).fileURLToPath(import.meta.url);
   let shown = 0;
   const runChild = (i) => new Promise((resolve) => {
-    const child = spawn(process.execPath, [process.argv[1], ...base, "--shard", `${i}/${shardCount}`], { stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(process.execPath, [selfPath, ...base, "--shard", `${i}/${shardCount}`], { stdio: ["ignore", "pipe", "inherit"] });
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       const m = line.match(/^\[\d+\/\d+\]( .*)$/);
       if (m) console.log(`[${++shown}/${allSelected.length}]${m[1]}`);
