@@ -1052,8 +1052,13 @@ const shardCount = Math.max(1, parseInt(args["shards"] || "1", 10) || 1);
 const shardSpec = typeof args["shard"] === "string" ? args["shard"].match(/^(\d+)\/(\d+)$/) : null;
 const shardChild = shardSpec ? { index: Number(shardSpec[1]), count: Number(shardSpec[2]) } : null;
 const shardParent = shardCount > 1 && !shardChild;
-const items = shardChild ? allSelected.filter((_, i) => i % shardChild.count === shardChild.index) : allSelected;
-if (shardChild) console.log(`Shard ${shardChild.index + 1}/${shardChild.count}: ${items.length} of ${allSelected.length} pages`);
+// --shard-feed (set by the parent, never by hand): the child takes its pages from the parent's one
+// queue over the IPC channel instead of every K-th page. A fixed split left one child with the tail
+// while the others idled: a child whose tuner backed off fell behind, and the last ~5 of a 33-minute
+// capture ran at 5% CPU (WSP, Linux VM). A child started by hand with --shard i/K keeps the split.
+const shardFeed = !!(shardChild && args["shard-feed"] && process.send);
+const items = shardChild && !shardFeed ? allSelected.filter((_, i) => i % shardChild.count === shardChild.index) : allSelected;
+if (shardChild) console.log(`Shard ${shardChild.index + 1}/${shardChild.count}: ${shardFeed ? `pages from the shared queue of ${allSelected.length}` : `${items.length} of ${allSelected.length} pages`}`);
 let shardFailures = 0;
 if (shardParent) {
   const share = (name, fallback) => {
@@ -1084,8 +1089,17 @@ if (shardParent) {
   // which has already removed the command word these flags follow.
   const selfPath = (await import("node:url")).fileURLToPath(import.meta.url);
   let shown = 0;
+  // The shared queue: a child asks for as many pages as it has idle workers, and gets the next
+  // indices in page order, or `end` once there are none left.
+  let nextIndex = 0;
   const runChild = (i) => new Promise((resolve) => {
-    const child = spawn(process.execPath, [selfPath, ...base, "--shard", `${i}/${shardCount}`], { stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(process.execPath, [selfPath, ...base, "--shard", `${i}/${shardCount}`, "--shard-feed", "1"], { stdio: ["ignore", "pipe", "inherit", "ipc"] });
+    child.on("message", (m) => {
+      if (!m || !m.need) return;
+      const take = [];
+      while (take.length < m.need && nextIndex < allSelected.length) take.push(nextIndex++);
+      try { child.send({ items: take, end: nextIndex >= allSelected.length }); } catch { /* the child is gone */ }
+    });
     readline.createInterface({ input: child.stdout }).on("line", (line) => {
       const m = line.match(/^\[\d+\/\d+\]( .*)$/);
       if (m) console.log(`[${++shown}/${allSelected.length}]${m[1]}`);
@@ -1111,7 +1125,38 @@ let done = 0;
 let failed = 0;
 let non200 = 0;
 let bypassed = 0;
-const queue = [...items];
+const queue = shardFeed ? [] : [...items];
+// Fed from the parent (--shard-feed): one request at a time, for as many pages as workers wait.
+let feedDone = !shardFeed;
+let feedPending = null;
+let feedWake = null;
+let feedWaiting = 0;
+let feedTaken = 0;
+if (shardFeed) {
+  process.on("message", (m) => {
+    if (!m || !Array.isArray(m.items)) return;
+    for (const i of m.items) queue.push(allSelected[i]);
+    feedTaken += m.items.length;
+    if (m.end) feedDone = true;
+    const wake = feedWake;
+    feedPending = null;
+    feedWake = null;
+    wake?.();
+  });
+}
+async function nextItem() {
+  for (;;) {
+    if (queue.length) return queue.shift();
+    if (feedDone) return undefined;
+    feedWaiting++;
+    if (!feedPending) {
+      feedPending = new Promise((resolve) => (feedWake = resolve));
+      process.send({ need: Math.max(1, feedWaiting) });
+    }
+    await feedPending;
+    feedWaiting--;
+  }
+}
 
 // Workers read the tuner's target before each page: one above it retires, and the controller
 // below spawns new ones when the target rises. Without --concurrency auto there is no tuner and
@@ -1179,7 +1224,7 @@ async function runWorkerOn(browser, release) {
       release();
       break;
     }
-    const item = queue.shift();
+    const item = await nextItem();
     if (item === undefined) break;
     const { path: pagePath, prodStatus } = item;
     const statusOnly = prodStatus !== null && prodStatus !== 200;
@@ -1295,7 +1340,7 @@ const running = shardParent ? [] : Array.from({ length: Math.min(concurrency, it
 const controller = tuner && !shardParent
   ? setInterval(() => {
       const target = tuner.tick();
-      while (active < target && queue.length > 0) running.push(worker());
+      while (active < target && (queue.length > 0 || !feedDone)) running.push(worker());
     }, 1000)
   : null;
 // The pool can grow while we wait, so drain until no worker is left.
@@ -1306,8 +1351,10 @@ await Promise.all(browsers.map((b) => b.close()));
 
 // A shard child is done here: the parent writes the manifest once every child has finished.
 if (shardChild) {
-  console.log(`Done: shard ${shardChild.index + 1}/${shardChild.count}, ${items.length} pages, ${non200} non-200 (${failed} hard failures)`);
-  process.exit(throttleExhausted || items.length === 0 || failed > items.length / 2 ? 1 : 0);
+  const mine = shardFeed ? feedTaken : items.length;
+  console.log(`Done: shard ${shardChild.index + 1}/${shardChild.count}, ${mine} pages, ${non200} non-200 (${failed} hard failures)`);
+  // A fed child that got no page at all (the others took them) is not a failure.
+  process.exit(throttleExhausted || (!shardFeed && mine === 0) || failed > mine / 2 ? 1 : 0);
 }
 // The parent counts from the markers its children wrote.
 if (shardParent) {
