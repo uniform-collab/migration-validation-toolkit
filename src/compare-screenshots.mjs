@@ -44,9 +44,11 @@
  * still scores 0 as `missing-in-migrated` / `extra-in-migrated`.
  */
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { imageMeta } from "./lib/img.mjs";
-import { compareImages } from "./lib/pixdiff.mjs";
+import { compareImages as compareInProcess } from "./lib/pixdiff.mjs";
+import { createPixPool } from "./lib/pixpool.mjs";
 import {
   parseArgs,
   requireArg,
@@ -63,6 +65,12 @@ import {
 import { parseExcludedComponents } from "./lib/index-json.mjs";
 
 const args = parseArgs(process.argv.slice(2));
+// --jobs N: image pairs compared on N worker threads, and 2N pages scored at a time (lib/pixpool.mjs).
+// Default: one per core but one, at most 16. --jobs 1 compares in-process, one page at a time - the
+// behaviour before; the report is the same either way (pages keep their order).
+const jobs = Math.max(1, parseInt(args["jobs"] || String(Math.min(16, (os.availableParallelism?.() ?? os.cpus().length) - 1)), 10) || 1);
+const pixPool = createPixPool(jobs);
+const compareImages = pixPool ? (...a) => pixPool.run(...a) : compareInProcess;
 const shotsDir = requireArg(args, "shots-dir");
 const reportDir = requireArg(args, "report-dir");
 const failUnder = args["fail-under"] ? parseFloat(args["fail-under"]) : null;
@@ -397,19 +405,35 @@ const notFoundOnStage = new Set(availability.notFound);
 const excluded = [];
 const noComponents = [];
 const pages = [];
-for (const pagePath of candidatePaths) {
+// Scored 2 x --jobs pages at a time (one page's pairs are compared one after another), collected
+// by index so the report lists them in the same order as a sequential run.
+const scoredAt = new Array(candidatePaths.length);
+let nextPage = 0;
+await Promise.all(
+  Array.from({ length: pixPool ? jobs * 2 : 1 }, async () => {
+    while (nextPage < candidatePaths.length) {
+      const i = nextPage++;
+      const pagePath = candidatePaths[i];
+      if (excludePaths.has(pagePath) || notFoundOnStage.has(pagePath)) continue;
+      scoredAt[i] = await scorePage(pagePath);
+    }
+  })
+);
+await pixPool?.close();
+candidatePaths.forEach((pagePath, i) => {
   if (excludePaths.has(pagePath)) {
     excluded.push(pagePath);
-    continue;
+    return;
   }
-  if (notFoundOnStage.has(pagePath)) continue;
-  const scored = await scorePage(pagePath);
+  if (notFoundOnStage.has(pagePath)) return;
+  const scored = scoredAt[i];
   if (scored === null) {
     noComponents.push(pagePath);
-    continue;
+    return;
   }
   pages.push(scored);
-}
+});
+if (pixPool) console.log(`Compared on ${jobs} worker threads.`);
 
 const overall = pages.length ? pages.reduce((n, p) => n + p.score, 0) / pages.length : 100;
 const allDiffs = collectDiffs(pages);
