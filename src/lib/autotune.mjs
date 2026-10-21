@@ -55,6 +55,13 @@ export const WARMUP_MS = 240_000;
 export const CONTEXT_MEMORY_BYTES = 600 * 1024 * 1024;
 /** Free host memory below this fraction of total counts as a degradation signal. */
 export const LOW_MEMORY_FRACTION = 0.08;
+/**
+ * A window is a verdict on its level only when more than this fraction of its pages degraded. One
+ * page in a window of 60 is the page, not the level: on a WSP capture single slow pages cut a
+ * level of 58 by a quarter, window after window, down to 3. At a low level one page is still more
+ * than this, so the tuner stays as careful there as before.
+ */
+export const TOLERATED_FRACTION = 0.05;
 /** Degradation kinds that always count, even when they show at the minimum level. */
 export const PERSISTENT_KINDS = new Set(["host memory low"]);
 
@@ -119,6 +126,9 @@ export function decide(prev, window) {
       };
     }
     if (!kinds.length) window = { ...window, degraded: 0 };
+    else if (!kinds.some((k) => PERSISTENT_KINDS.has(k)) && window.degraded <= window.completed * TOLERATED_FRACTION) {
+      window = { ...window, degraded: 0 };
+    }
   }
 
   if (window.degraded > 0) {

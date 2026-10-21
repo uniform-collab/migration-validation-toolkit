@@ -117,3 +117,11 @@ test("warm-up also lasts WARMUP_MS: a degraded window inside it sets no ceiling"
   ({ state: s } = decide(s, { ...bad(), sinceStart: WARMUP_MS + 1 }));
   assert.ok(s.ceiling < 60);
 });
+test("one degraded page in a wide window is the page, not the level", () => {
+  let s = { ...initialState({ start: 58, max: 60 }), windows: WARMUP_WINDOWS + 1, phase: "climb" };
+  ({ state: s } = decide(s, { seconds: 20, completed: 60, degraded: 1, reasons: ["1 nav timeout"], kinds: { "nav timeout": 1 }, sinceStart: 600000 }));
+  assert.equal(s.ceiling, 60);
+  assert.ok(s.target >= 58);
+  ({ state: s } = decide(s, { seconds: 20, completed: 60, degraded: 4, reasons: ["4 nav timeout"], kinds: { "nav timeout": 4 }, sinceStart: 620000 }));
+  assert.ok(s.ceiling < 60);
+});
