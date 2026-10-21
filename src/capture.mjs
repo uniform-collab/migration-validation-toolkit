@@ -1040,7 +1040,58 @@ if (previewSecret) {
   );
 }
 
-const items = limit > 0 ? allItems.slice(0, limit) : allItems;
+const allSelected = limit > 0 ? allItems.slice(0, limit) : allItems;
+
+// --shards K: K capture processes, each with every K-th page. One process funnels every page through
+// its single node main thread (CDP traffic, extraction, image work), which sat at ~80% of a core while
+// the tuner held ~80 pages and two thirds of a 30-core box idled. The parent starts K copies of this
+// command with --shard i/K and its share of --browsers / --concurrency-start / --concurrency-max,
+// shows their page lines as one counter, and writes the manifest from the page markers as before.
+// A child writes no manifest, so the K never race on one file. Default 1 = one process, as before.
+const shardCount = Math.max(1, parseInt(args["shards"] || "1", 10) || 1);
+const shardSpec = typeof args["shard"] === "string" ? args["shard"].match(/^(\d+)\/(\d+)$/) : null;
+const shardChild = shardSpec ? { index: Number(shardSpec[1]), count: Number(shardSpec[2]) } : null;
+const shardParent = shardCount > 1 && !shardChild;
+const items = shardChild ? allSelected.filter((_, i) => i % shardChild.count === shardChild.index) : allSelected;
+if (shardChild) console.log(`Shard ${shardChild.index + 1}/${shardChild.count}: ${items.length} of ${allSelected.length} pages`);
+let shardFailures = 0;
+if (shardParent) {
+  const share = (name, fallback) => {
+    const v = parseInt(args[name] ?? fallback, 10);
+    return Number.isFinite(v) && v > 0 ? String(Math.max(1, Math.ceil(v / shardCount))) : null;
+  };
+  const perChild = {
+    browsers: share("browsers", "1"),
+    "concurrency-start": share("concurrency-start", "4"),
+    "concurrency-max": args["concurrency-max"] ? share("concurrency-max") : String(Math.max(1, Math.ceil(defaultMaxConcurrency() / shardCount))),
+  };
+  if (!autoConcurrency) perChild.concurrency = share("concurrency", "6");
+  // The child command line: this one without --shards, with the per-child shares replacing the originals.
+  const replaced = new Set(["shards", ...Object.keys(perChild)]);
+  const base = [];
+  const raw = process.argv.slice(2);
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i];
+    const name = a.startsWith("--") ? a.slice(2).split("=")[0] : null;
+    if (name && replaced.has(name)) { if (!a.includes("=") && raw[i + 1] !== undefined && !raw[i + 1].startsWith("--")) i++; continue; }
+    base.push(a);
+  }
+  for (const [k, v] of Object.entries(perChild)) if (v) base.push(`--${k}`, v);
+  console.log(`Shards: ${shardCount} capture processes (per process: ${Object.entries(perChild).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ")})`);
+  const { spawn } = await import("node:child_process");
+  const readline = await import("node:readline");
+  let shown = 0;
+  const runChild = (i) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [process.argv[1], ...base, "--shard", `${i}/${shardCount}`], { stdio: ["ignore", "pipe", "inherit"] });
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      const m = line.match(/^\[\d+\/\d+\]( .*)$/);
+      if (m) console.log(`[${++shown}/${allSelected.length}]${m[1]}`);
+      else if (!/^(Capturing \d+|Done: )/.test(line)) console.log(line);
+    });
+    child.on("exit", (code) => { if (code) shardFailures++; resolve(); });
+  });
+  await Promise.all(Array.from({ length: shardCount }, (_, i) => runChild(i)));
+}
 console.log(
   `Capturing ${items.length}${limit > 0 ? ` (of ${allItems.length}, --limit)` : ""} pages from ${baseUrl}` +
     `${outDir ? ` -> ${outDir}` : ""}${shotsOut ? ` + ${shotsOut}` : ""}`
@@ -1050,7 +1101,7 @@ console.log(
 // every page through its own main thread and one GPU compositor (VizCompositor), which top out at
 // ~80 pages while the rest of the machine idles; N browsers split both N ways. Default 1.
 const browserCount = Math.max(1, parseInt(args["browsers"] || "1", 10) || 1);
-const browsers = await Promise.all(Array.from({ length: browserCount }, () => chromium.launch()));
+const browsers = shardParent ? [] : await Promise.all(Array.from({ length: browserCount }, () => chromium.launch()));
 const browserLoad = browsers.map(() => 0);
 if (browserCount > 1) console.log(`Browsers: ${browserCount} (workers spread over them)`);
 let done = 0;
@@ -1237,8 +1288,8 @@ async function runWorkerOn(browser, release) {
   await context.close();
 }
 
-const running = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
-const controller = tuner
+const running = shardParent ? [] : Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+const controller = tuner && !shardParent
   ? setInterval(() => {
       const target = tuner.tick();
       while (active < target && queue.length > 0) running.push(worker());
@@ -1247,8 +1298,22 @@ const controller = tuner
 // The pool can grow while we wait, so drain until no worker is left.
 while (running.length) await Promise.all(running.splice(0));
 if (controller) clearInterval(controller);
-if (tuner) console.log(tuner.summary());
+if (tuner && !shardParent) console.log(tuner.summary());
 await Promise.all(browsers.map((b) => b.close()));
+
+// A shard child is done here: the parent writes the manifest once every child has finished.
+if (shardChild) {
+  console.log(`Done: shard ${shardChild.index + 1}/${shardChild.count}, ${items.length} pages, ${non200} non-200 (${failed} hard failures)`);
+  process.exit(throttleExhausted || items.length === 0 || failed > items.length / 2 ? 1 : 0);
+}
+// The parent counts from the markers its children wrote.
+if (shardParent) {
+  for (const { path: p } of items) {
+    const m = markerPath(doShots ? shotsOut : outDir, p);
+    if (!fs.existsSync(m)) { failed++; continue; }
+    try { const rec = readJson(m); if (!rec.status) failed++; else if (rec.status !== 200 && !rec.statusOnly) non200++; } catch { failed++; }
+  }
+}
 
 // Aggregate per-page markers into a manifest, once per active output dir.
 //
@@ -1304,7 +1369,7 @@ console.log(
     `${doShots ? `, ${totalShots} screenshots` : ""}. Manifest(s): ${manifests.join(", ")}`
 );
 
-if (items.length === 0 || failed > items.length / 2) {
+if (items.length === 0 || failed > items.length / 2 || shardFailures) {
   console.error("Capture unhealthy (no pages or >50% failures) — failing.");
   process.exit(1);
 }
