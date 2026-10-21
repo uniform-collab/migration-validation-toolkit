@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { initialState, decide, WARMUP_WINDOWS, WARMUP_MS } from "./autotune.mjs";
+import { initialState, decide, WARMUP_WINDOWS, WARMUP_MS, ConcurrencyTuner } from "./autotune.mjs";
 
 const clean = (completed, seconds = 10) => ({ seconds, completed, degraded: 0 });
 const bad = (completed = 5) => ({ seconds: 10, completed, degraded: 1, reasons: ["1 nav-timeout"] });
@@ -124,4 +124,19 @@ test("one degraded page in a wide window is the page, not the level", () => {
   assert.ok(s.target >= 58);
   ({ state: s } = decide(s, { seconds: 20, completed: 60, degraded: 4, reasons: ["4 nav timeout"], kinds: { "nav timeout": 4 }, sinceStart: 620000 }));
   assert.ok(s.ceiling < 60);
+});
+test("a window with one degraded page waits for a full sample before it is judged", () => {
+  const lines = [];
+  const t = new ConcurrencyTuner({ start: 40, max: 60, intervalMs: 15000, log: (l) => lines.push(l) });
+  t.state.windows = WARMUP_WINDOWS + 1;
+  t.startedAt -= WARMUP_MS * 2;
+  const t0 = t.windowStart;
+  for (let i = 0; i < 10; i++) t.record([], true, 10, 20000);
+  t.record(["unstable layout"], true, 10, 20000);
+  assert.equal(t.tick(t0 + 16000), 40); // 11 pages, 1 degraded: not closed yet
+  assert.equal(t.state.ceiling, 60);
+  for (let i = 0; i < 30; i++) t.record([], true, 10, 20000);
+  t.tick(t0 + 30000); // 41 pages, 1 degraded (2%): closed, and clean
+  assert.equal(t.state.ceiling, 60);
+  assert.ok(!lines.some((l) => /backing off/.test(l)));
 });

@@ -267,9 +267,12 @@ export class ConcurrencyTuner {
     const elapsed = now - this.windowStart;
     if (elapsed < this.intervalMs) return this.state.target;
     const memLow = os.freemem() < os.totalmem() * LOW_MEMORY_FRACTION;
-    // A clean window closes only once every worker has had a chance to finish a page; a degraded
-    // one closes at once - there is nothing to gain from measuring more of a level that hurts.
-    if (!memLow && this.degraded === 0 && this.completed < this.state.target && elapsed < this.intervalMs * 6) {
+    // A window closes only once every worker has had a chance to finish a page. A degraded one closes
+    // at once only when its degraded pages already exceed the tolerated share of the level - there
+    // is nothing to gain from measuring more of a level that hurts. Closing on the first degraded
+    // page judged a level of 58 on the 10-30 pages done in 15 s, where one page is over the share.
+    const evident = this.degraded > this.state.target * TOLERATED_FRACTION;
+    if (!memLow && !evident && this.completed < this.state.target && elapsed < this.intervalMs * 6) {
       return this.state.target;
     }
     const reasons = [...this.reasons].map(([r, n]) => `${n} ${r}`);
