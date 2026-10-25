@@ -1268,6 +1268,18 @@ async function runWorkerOn(browser, release) {
           throttleExhausted++;
           console.warn(`  ${what} ${pagePath} - STILL throttled after ${attempt} attempts; recording it`);
         }
+        // --no-retry: a 200 that resolved NONE of the page's components is the same burst symptom as
+        // a timeout - the page loaded blank under load - so it gets the same one end-pass retry at
+        // low concurrency. Two WSP full runs each lost one or two whole pages this way, a different
+        // one each run, every one of them complete when loaded on its own.
+        if (noRetry && !statusOnly && rec.status === 200 && !rec.noIndex && (rec.targets || 0) > 0
+            && rec.resolved === 0 && !item.deferred) {
+          item.deferred = `0 of ${rec.targets} components resolved`;
+          deferredItems.push(item);
+          deferredNow = true;
+          rec = undefined;
+          break;
+        }
         if (!noRetry && !statusOnly && rec.status === 200 && !rec.noIndex && attempt < 2) {
           const emptyContent = doContent && !rec.elements;
           const emptyShots = doShots && !rec.shotsCaptured;
