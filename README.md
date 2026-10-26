@@ -482,7 +482,9 @@ migration-validate accept --report <report.json> --accepted <file> --reason "<wh
 ```
 
 It adds (or, for the same page + key, replaces) one entry per matching diff. Filter narrowly and
-`--dry-run` first: every diff it matches is accepted as it stands.
+`--dry-run` first: every diff it matches is accepted as it stands. From Git Bash on Windows, set
+`MSYS_NO_PATHCONV=1`: MSYS rewrites a `--page /en-gl/...` argument into a Windows path before node
+sees it, and the command then silently matches nothing.
 
 ---
 
