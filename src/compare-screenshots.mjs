@@ -272,9 +272,22 @@ async function scorePage(pagePath) {
   let totalHeight = 0;
   let comparedCount = 0;
 
+  // The --exclude-components pairs, scored only for the "without exclusions" figure
+  // (rawOverallScore): no diff image, not listed, not part of the page score.
+  let rawWeightedMismatch = 0;
+  let rawTotalHeight = 0;
+  let rawComparedCount = 0;
   for (const key of allKeys) {
     const name = names.get(key) || key;
-    if (isExcludedComponent(name)) continue;
+    if (isExcludedComponent(name)) {
+      const s = await scoreExcludedPair(prodPageDir, migPageDir, key, prodSet, migSet, prodSkipped, migSkipped);
+      if (s) {
+        rawWeightedMismatch += s.mismatch * s.height;
+        rawTotalHeight += s.height;
+        rawComparedCount++;
+      }
+      continue;
+    }
     const prodImg = path.join(prodPageDir, key, `${key}_prod.png`);
     const migImg = path.join(migPageDir, key, `${key}_migrated.png`);
     const diffImg = path.join(diffPageDir, key, `${key}_diff.png`);
@@ -341,12 +354,35 @@ async function scorePage(pagePath) {
     }
   }
 
-  // Nothing comparable on this page (every component skipped on one side or
-  // errored) - not scored, rather than a free 100.
-  if (comparedCount === 0) return null;
+  const pageScore = (wm, th) => (th > 0 ? Math.max(0, 100 - wm / th) : 100);
+  const rawScore =
+    comparedCount + rawComparedCount > 0
+      ? pageScore(weightedMismatch + rawWeightedMismatch, totalHeight + rawTotalHeight)
+      : null;
 
-  const score = totalHeight > 0 ? Math.max(0, 100 - weightedMismatch / totalHeight) : 100;
-  return { path: pagePath, score, components };
+  // Nothing comparable on this page (every component skipped on one side or
+  // errored) - not scored, rather than a free 100. Its excluded pairs still count
+  // toward the "without exclusions" figure.
+  if (comparedCount === 0) return rawScore === null ? null : { path: pagePath, rawOnly: true, rawScore };
+
+  return { path: pagePath, score: pageScore(weightedMismatch, totalHeight), rawScore, components };
+}
+
+// One --exclude-components pair, scored the way scorePage scores a pair, for rawOverallScore.
+// null = not comparable (skipped on one side, or a compare error).
+async function scoreExcludedPair(prodPageDir, migPageDir, key, prodSet, migSet, prodSkipped, migSkipped) {
+  const prodImg = path.join(prodPageDir, key, `${key}_prod.png`);
+  const migImg = path.join(migPageDir, key, `${key}_migrated.png`);
+  if (prodSet.has(key) && !migSet.has(key))
+    return migSkipped.has(key) ? null : { mismatch: 100, height: await imageHeight(prodImg) };
+  if (!prodSet.has(key) && migSet.has(key))
+    return prodSkipped.has(key) ? null : { mismatch: 100, height: await imageHeight(migImg) };
+  try {
+    const { mismatch, height } = await compareImages(prodImg, migImg, null);
+    return { mismatch, height: height > 0 ? height : 0 };
+  } catch {
+    return null;
+  }
 }
 
 /* ---------- regression diff vs previous report (git / --prev-report) ---------- */
@@ -404,6 +440,7 @@ const notFoundOnStage = new Set(availability.notFound);
 
 const excluded = [];
 const noComponents = [];
+const rawOnlyPageScores = []; // noComponents pages whose --exclude-components pairs were comparable
 const pages = [];
 // Scored 2 x --jobs pages at a time (one page's pairs are compared one after another), collected
 // by index so the report lists them in the same order as a sequential run.
@@ -427,8 +464,9 @@ candidatePaths.forEach((pagePath, i) => {
   }
   if (notFoundOnStage.has(pagePath)) return;
   const scored = scoredAt[i];
-  if (scored === null) {
+  if (scored === null || scored.rawOnly) {
     noComponents.push(pagePath);
+    if (scored) rawOnlyPageScores.push(scored.rawScore);
     return;
   }
   pages.push(scored);
@@ -436,6 +474,10 @@ candidatePaths.forEach((pagePath, i) => {
 if (pixPool) console.log(`Compared on ${jobs} worker threads.`);
 
 const overall = pages.length ? pages.reduce((n, p) => n + p.score, 0) / pages.length : 100;
+// The overall score with --exclude-components scored in (the visual report has no accepted
+// differences). Scope and stage 404s stay out, as in compare.mjs.
+const rawPageScores = [...pages.map((p) => p.rawScore ?? p.score), ...rawOnlyPageScores];
+const rawOverall = rawPageScores.length ? rawPageScores.reduce((n, s) => n + s, 0) / rawPageScores.length : 100;
 const allDiffs = collectDiffs(pages);
 const allComponents = pages.flatMap((p) => p.components.map((c) => ({ ...c, page: p.path })));
 const totalComponents = allComponents.length;
@@ -505,6 +547,10 @@ if (failedSet) {
 lines.push("");
 lines.push(`## Overall visual score${failedSet ? " (failed-only subset)" : ""}: ${fmt(overall)}%`);
 lines.push("");
+if (excludeComponents.size) {
+  lines.push(`${fmt(rawOverall)}% (without exclusions: \`--exclude-components\` scored)`);
+  lines.push("");
+}
 lines.push(`## Pages on stage (not 404): ${formatAvailability(availability)}`);
 lines.push("");
 if (availability.notFound.length) {
@@ -658,6 +704,8 @@ writeJson(path.join(reportDir, "report-screenshots.json"), {
   migratedDir: migDir,
   diffDir,
   overallScore: overall,
+  // overallScore with --exclude-components scored in (see rawOverall); only when the run had any.
+  rawOverallScore: excludeComponents.size ? rawOverall : undefined,
   failedOnly: failedSet ? { count: failedSet.size } : undefined,
   pagesScored: pages.length,
   pagesInScope: availability.inScope,

@@ -203,7 +203,16 @@ function scoreV2Page(slug, pagePath) {
   const exp = readComponentDataset(path.join(expectedDir, slug));
   const act = readComponentDataset(path.join(actualDir, slug));
   const elements = [];
+  // The --exclude-components pairs, scored only for the "without exclusions" figure
+  // (rawOverallScore) - never listed, never part of the page score.
+  const excludedElements = [];
   const seen = new Set();
+  const pushExcluded = (prodText, stageText, tag) => {
+    const p = normalizeText(prodText ?? "");
+    const s = normalizeText(stageText ?? "");
+    const score = tag ? 0 : p === s ? 100 : elementScore(p, s);
+    excludedElements.push({ score, prodLen: p.length, stageLen: s.length });
+  };
   const pushPair = (key, name, prodText, stageText, tag) => {
     const p = normalizeText(prodText ?? "");
     const s = normalizeText(stageText ?? "");
@@ -228,16 +237,25 @@ function scoreV2Page(slug, pagePath) {
   };
   for (const { key, name } of exp.order) {
     seen.add(key);
-    if (isExcludedComponent(name)) continue;
-    if (act.texts.has(key)) pushPair(key, name, exp.texts.get(key), act.texts.get(key), null);
-    else pushPair(key, name, exp.texts.get(key), "", "missing-on-stage");
+    const push = isExcludedComponent(name) ? (k, n, ...rest) => pushExcluded(...rest) : pushPair;
+    if (act.texts.has(key)) push(key, name, exp.texts.get(key), act.texts.get(key), null);
+    else push(key, name, exp.texts.get(key), "", "missing-on-stage");
   }
   for (const { key, name } of act.order) {
     if (seen.has(key)) continue;
-    if (isExcludedComponent(name)) continue;
-    pushPair(key, name, "", act.texts.get(key), "extra-on-stage");
+    if (isExcludedComponent(name)) pushExcluded("", act.texts.get(key), "extra-on-stage");
+    else pushPair(key, name, "", act.texts.get(key), "extra-on-stage");
   }
-  return elements;
+  return { elements, excludedElements };
+}
+
+// A page's score as if nothing were excluded: accepted diffs at their real score and
+// the --exclude-components pairs counted in. Feeds rawOverallScore only.
+function rawPageScore(elements, excludedElements) {
+  return weightedScore([
+    ...elements.map((e) => (e.accepted ? { ...e, score: e.rawScore } : e)),
+    ...excludedElements,
+  ]);
 }
 
 // Human label for an element diff: the rendering name behind its stable
@@ -321,6 +339,7 @@ const noIndexPages = []; // V2 only: prod-200 pages with no index.json — repor
 // element list as 100, which would let such a page claim perfect parity while nothing was actually
 // compared, so they are reported and left out of the mean instead.
 const noComponentPages = [];
+const rawOnlyPageScores = []; // noComponentPages that only --exclude-components emptied
 const pages = [];
 
 for (const pagePath of prod200Paths) {
@@ -347,10 +366,12 @@ for (const pagePath of prod200Paths) {
     continue;
   }
 
-  const elements = scoreV2Page(slug, pagePath);
+  const { elements, excludedElements } = scoreV2Page(slug, pagePath);
 
   if (elements.length === 0) {
     noComponentPages.push({ path: pagePath });
+    // A page whose every component is excluded is still a page without exclusions.
+    if (excludedElements.length) rawOnlyPageScores.push(rawPageScore([], excludedElements));
     continue;
   }
 
@@ -359,6 +380,7 @@ for (const pagePath of prod200Paths) {
     prodStatus: 200,
     stageStatus: 200,
     score: weightedScore(elements),
+    rawScore: rawPageScore(elements, excludedElements),
     elements,
   });
 }
@@ -379,6 +401,11 @@ for (const p of statusMismatches) {
 const overall = pages.length
   ? pages.reduce((sum, p) => sum + p.score, 0) / pages.length
   : 0;
+// The overall score with the score-level exclusions undone: accepted diffs at their real
+// score, --exclude-components scored in. Scope (--include / --exclude paths) and the stage
+// 404s stay out - they decide WHICH pages a report is about, not how a page scores.
+const rawPageScores = [...pages.map((p) => p.rawScore ?? p.score), ...rawOnlyPageScores];
+const rawOverall = rawPageScores.length ? rawPageScores.reduce((a, b) => a + b, 0) / rawPageScores.length : 0;
 const totalElements = pages.reduce((n, p) => n + p.elements.length, 0);
 const diffElements = pages.flatMap((p) =>
   p.elements.filter((e) => e.score < 100).map((e) => ({ page: p.path, ...e }))
@@ -453,6 +480,10 @@ if (failedSet) {
 lines.push("");
 lines.push(`## Overall score${failedSet ? " (failed-only subset)" : ""}: ${fmt(overall)}%`);
 lines.push("");
+if (accepted.file || excludeComponents.size) {
+  lines.push(`${fmt(rawOverall)}% (without exclusions: accepted differences at their real score, \`--exclude-components\` scored)`);
+  lines.push("");
+}
 lines.push(`## Pages on stage (not 404): ${formatAvailability(availability)}`);
 lines.push("");
 lines.push(`${totalElements} element pairs compared, ${diffElements.length} differ (${zeroElements} score 0), ${stageNon200.filter((p) => p.status !== 404).length} pages broken on stage, ${availability.notFound.length} not on stage (404, not scored), ${statusMismatches.length} status-parity mismatches.`);
@@ -675,6 +706,9 @@ writeJson(path.join(reportDir, "report.json"), {
   prodUrl: expected.baseUrl,
   stageUrl: actual.baseUrl,
   overallScore: overall,
+  // overallScore without the accepted differences and --exclude-components (see rawOverall);
+  // only when the run had either.
+  rawOverallScore: accepted.file || excludeComponents.size ? rawOverall : undefined,
   failedOnly: failedSet ? { count: failedSet.size, source: prev.source } : undefined,
   pagesScored: pages.length,
   // Coverage: in-scope pages prod serves, and how many of them the stage does not 404.

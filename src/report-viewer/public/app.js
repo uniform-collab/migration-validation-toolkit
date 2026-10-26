@@ -456,18 +456,25 @@ function viewOverview() {
           Math.abs(delta) < 0.1 ? 3 : 1
         )}</span> vs ${fmt(cmp.prevOverall)} (${esc(cmp.source || "prev")})`;
 
+  // The score with the accepted differences and --exclude-components undone, under the
+  // headline (a report from an older toolkit has none).
+  const rawLine = (r) =>
+    r?.rawOverallScore != null
+      ?`<span class="raw">${fmt(r.rawOverallScore)}% (without exclusions)</span>`
+      : "";
+
   const kpis = [
     kpi(
       "Content score",
       m.content ? `<span class="s-${grade(m.content.overallScore)}">${fmt(m.content.overallScore)}%</span>` : "—",
-      deltaHtml,
+      deltaHtml + rawLine(m.content),
       "big"
     ),
     kpi(
       "Visual score",
       m.visual ? `<span class="s-${grade(m.visual.overallScore)}">${fmt(m.visual.overallScore)}%</span>` : "—",
       m.visual
-        ? `${int(m.visual.componentsCompared)} shots · ${int(m.visual.componentsScoringZero)} at 0`
+        ? `${int(m.visual.componentsCompared)} shots · ${int(m.visual.componentsScoringZero)} at 0` + rawLine(m.visual)
         : "run 6400 to produce it",
       "big"
     ),

@@ -127,6 +127,12 @@ migration-validate compare --expected ./expected-v2 --actual ./actual-v2 \
 | `--missing-words <n>` | Component report: trim a one-sided component's text to N words (`0` = full, default 8). |
 | `--only-failed` / `--prev-report <path>` | Score only the previously-failing subset. |
 
+When `--accepted` or `--exclude-components` is given, the report also carries `rawOverallScore`: the
+overall score **without exclusions** - accepted diffs at their real score, the excluded components
+scored. `compare-screenshots` does the same for `--exclude-components`. The report viewer shows it in
+small text under each headline score. Scope (`--include`, `--exclude` paths) and stage 404s are not
+exclusions: they decide which pages a report is about, and stay out of both numbers.
+
 ### `compare-screenshots`
 
 ```bash

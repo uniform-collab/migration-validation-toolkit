@@ -136,7 +136,8 @@ export async function compareImages(prodPath, migPath, diffPath) {
 
   const mismatch = W && H ? (mismatched / (W * H)) * 100 : 0;
   let diffWritten = false;
-  if (mismatch > 0) {
+  // diffPath null = score only, no diff image (the excluded pairs behind rawOverallScore).
+  if (mismatch > 0 && diffPath) {
     // Only now is the union-sized canvas worth building - the identical majority
     // of pairs never allocates or paints it.
     const out = Buffer.alloc(W * H * 4);

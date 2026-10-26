@@ -308,6 +308,8 @@ function buildModel() {
       ? {
           generatedAt: content.generatedAt,
           overallScore: content.overallScore,
+          // Without accepted differences and --exclude-components; absent in older reports.
+          rawOverallScore: content.rawOverallScore ?? null,
           pagesScored: content.pagesScored,
           // Coverage: stage-404 pages are counted here and left out of the score.
           pagesInScope: content.pagesInScope ?? null,
@@ -329,6 +331,7 @@ function buildModel() {
       ? {
           generatedAt: visual.generatedAt,
           overallScore: visual.overallScore,
+          rawOverallScore: visual.rawOverallScore ?? null,
           pagesScored: visual.pagesScored,
           pagesInScope: visual.pagesInScope ?? null,
           pagesAvailable: visual.pagesAvailable ?? null,

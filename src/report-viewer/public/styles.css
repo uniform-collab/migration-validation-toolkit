@@ -118,6 +118,7 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; 
 .kpi .label { color: var(--fg-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
 .kpi .value { font-size: 30px; font-weight: 600; line-height: 1.15; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .kpi .sub { color: var(--fg-dim); font-size: 12px; margin-top: 4px; }
+.kpi .sub .raw { display: block; color: var(--fg-faint); font-size: 11px; margin-top: 2px; }
 .kpi.big { grid-column: span 2; }
 .kpi .value .of { color: var(--fg-dim); font-size: 20px; font-weight: 500; }
 .delta.up { color: var(--good); }
