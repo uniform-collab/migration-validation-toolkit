@@ -258,12 +258,16 @@ export function readComponentDataset(pageDir) {
  * repo's top level, because `git show <commit>:<path>` resolves from there and not
  * from `-C`. Deriving it as `reportDir/..` found the commit but then asked `git show`
  * for `local/report.json`, so every report one level deeper said "no previous report".
+ * `explicitPath` may also be a DIRECTORY holding a previous run's reports side by
+ * side; `<dir>/<reportName>` is read then, so a command that reads two of them
+ * (compare-screenshots: report.json + report-screenshots.json) takes one path.
  * Returns `{ report, source }` or `null` (no previous report / no git).
  */
 export function loadPreviousReport(reportDir, explicitPath, reportName = "report.json") {
   if (explicitPath) {
     try {
-      return { report: readJson(explicitPath), source: explicitPath };
+      const file = fs.statSync(explicitPath).isDirectory() ? path.join(explicitPath, reportName) : explicitPath;
+      return { report: readJson(file), source: file };
     } catch {
       return null;
     }

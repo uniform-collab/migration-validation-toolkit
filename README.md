@@ -539,7 +539,10 @@ General Information MISSION AND VALUES As the national (...)
 **Regression diff vs the previous report.** Under the overall score, the report diffs this run
 against the last one. The previous `report.json` is found automatically in git history (the last
 commit that changed `<report-dir>/report.json`, i.e. the prior run's compare commit) or read from
-`--prev-report`. It reports page-score buckets (**100%**, **50–100%**, **0–50%**) as
+`--prev-report` - a file, or a directory holding the previous run's `report.json` and
+`report-screenshots.json` side by side (`compare-screenshots` reads both: one for its regression
+diff, the other for `--only-failed`). Pass it whenever the current branch's history is not where the
+previous run left its report. It reports page-score buckets (**100%**, **50–100%**, **0–50%**) as
 `previous → current (Δ)` plus the overall move, **new diffs** (elements now < 100 that were 100 or
 absent — regressions) and **gone diffs** (were < 100, now 100 or gone — fixes). An element diff is
 keyed by `page + element`, i.e. "same slot on the same page". First-ever run prints a baseline note.
