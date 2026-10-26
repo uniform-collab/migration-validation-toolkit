@@ -274,10 +274,17 @@ export function extractCaptureTargets(indexJson) {
   const targets = [];
   let order = 0;
 
+  // The renderings enclosing the current one, outermost first: each one's target order, or null
+  // when it has no selector (CssSelectorScopeUp counts renderings, not targets).
+  const ancestors = [];
+
   const walk = (renderings, depth, placeholderKey, rootPlaceholderKey) => {
     if (!Array.isArray(renderings)) return;
     for (const r of renderings) {
-      if (hasSelector(r)) {
+      const own = hasSelector(r) ? order : null;
+      if (own !== null) {
+        const up = Number.isInteger(r.CssSelectorScopeUp) ? r.CssSelectorScopeUp : 0;
+        const scopeOrder = up > 0 && up <= ancestors.length ? ancestors[ancestors.length - up] : null;
         targets.push({
           order: order++,
           name: r.Name || "<unnamed>",
@@ -289,15 +296,21 @@ export function extractCaptureTargets(indexJson) {
           // matched element (CSS has no parent combinator).
           index: Number.isInteger(r.CssSelectorIndex) ? r.CssSelectorIndex : 0,
           levelsUp: Number.isInteger(r.CssSelectorLevelsUp) ? r.CssSelectorLevelsUp : 0,
+          // The same instance counted inside an enclosing rendering's element (CssSelectorScope*):
+          // the target to resolve first, and the index within it. null = page-wide only.
+          scopeOrder,
+          scopeIndex: Number.isInteger(r.CssSelectorScopeIndex) ? r.CssSelectorScopeIndex : 0,
           depth,
           placeholderKey,
           rootPlaceholderKey,
         });
       }
       if (Array.isArray(r.Placeholders)) {
+        ancestors.push(own);
         for (const ph of r.Placeholders) {
           walk(ph.Renderings, depth + 1, ph.Key || placeholderKey, rootPlaceholderKey);
         }
+        ancestors.pop();
       }
     }
   };
@@ -407,6 +420,18 @@ export function normalizeSelector(selector, rules) {
  * How a target resolves to an element — the contract every capture path must follow:
  *
  *     querySelectorAll(selector)[index]  then  .parentElement × levelsUp
+ *
+ * or, when the target carries a scope (`scopeOrder`, from CssSelectorScopeUp) and that target
+ * resolved on this page:
+ *
+ *     scopeElement.querySelectorAll(selector)[scopeIndex]  then  .parentElement × levelsUp
+ *
+ * The page-wide index only names the same element while every earlier match on the page is
+ * reproduced one for one; the scoped one counts only the matches inside the enclosing rendering, so
+ * a wrapper added or dropped elsewhere no longer shifts it onto a neighbour. A scoped index that
+ * finds nothing leaves the target unresolved rather than falling back to the page-wide one - a wrong
+ * instance is worse than none. Targets are resolved in `order` (DFS), so the scope is always done
+ * first.
  *
  * `querySelector` alone is wrong: the migration deliberately emits selectors that may match a few
  * elements and disambiguates by index. The two in-page resolvers (`collectComponentTexts` for

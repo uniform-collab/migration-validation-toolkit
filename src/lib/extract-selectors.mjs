@@ -13,7 +13,8 @@
  * innerText drops href entirely and hides link-only differences.
  *
  * @param cfg { targets: [{ order:number, key:string, name:string, sel:string,
- *                          index?:number, levelsUp?:number }] }
+ *                          index?:number, levelsUp?:number,
+ *                          scopeOrder?:number|null, scopeIndex?:number }] }
  * @returns { items: [{ order, key, name, text }],   // resolved, visible, non-empty
  *            unresolved: [{ order, key, name, sel }],
  *            empty: [{ order, key, name }],          // resolved but no text after masking
@@ -23,15 +24,17 @@ export function collectComponentTexts(cfg) {
   const MARK = "__selc__";
   const targets = cfg.targets || [];
 
-  // Selector + index + levelsUp — see "How a target resolves to an element" in index-json.mjs.
+  // Selector + index + levelsUp (+ scope) — see "How a target resolves to an element" in index-json.mjs.
+  const byOrder = new Map();
   const resolveTarget = (t) => {
+    const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
     let list;
     try {
-      list = document.querySelectorAll(t.sel);
+      list = (scope || document).querySelectorAll(t.sel);
     } catch {
       return null;
     }
-    let el = list[t.index || 0];
+    let el = list[scope ? t.scopeIndex || 0 : t.index || 0];
     for (let i = 0; el && i < (t.levelsUp || 0); i++) el = el.parentElement;
     return el || null;
   };
@@ -41,6 +44,7 @@ export function collectComponentTexts(cfg) {
   const unresolved = [];
   for (const t of targets) {
     const el = resolveTarget(t);
+    if (el) byOrder.set(t.order, el);
     if (el) {
       // The element is kept by reference, not re-queried by attribute: two renderings can legitimately
       // resolve to the same element (e.g. a wrapper reached via levelsUp), and the second tag would

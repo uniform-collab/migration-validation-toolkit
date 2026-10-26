@@ -205,10 +205,15 @@ document.querySelectorAll(CssSelector)[CssSelectorIndex]   // then .parentElemen
   elements rather than being forced into a brittle positional path.
 - `CssSelectorLevelsUp` (absent = 0) walks up from the match, for renderings whose own root element
   carries nothing identifiable but a descendant does (CSS has no parent combinator).
+- `CssSelectorScopeUp` / `CssSelectorScopeIndex` (optional) count the same instance inside an
+  enclosing rendering (`ScopeUp` renderings up the tree) instead of across the page. When that
+  rendering resolved, the target is `scope.querySelectorAll(CssSelector)[CssSelectorScopeIndex]`, so a
+  wrapper the migrated page adds or drops elsewhere no longer shifts a page-wide ordinal onto a
+  neighbour. Without them, or when the scope did not resolve, the page-wide index applies.
 
 **Never resolve one with `querySelector`** — that silently ignores the index and captures the wrong
 instance. Both in-page resolvers (`src/lib/extract-selectors.mjs` for content,
-`src/lib/screenshot.mjs` for screenshots) inline the three-field form; the contract is documented in
+`src/lib/screenshot.mjs` for screenshots) inline this form; the contract is documented in
 `src/lib/index-json.mjs`.
 
 `componentKey` is keyed on the rendering's **layout UID**, not its position in the target list, so

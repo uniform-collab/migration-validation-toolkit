@@ -248,24 +248,29 @@ export async function resolveAndTagTargets(page, targets, rebaseRules) {
     normalized: normalizeSelector(t.selector, rebaseRules),
     index: t.index || 0,
     levelsUp: t.levelsUp || 0,
+    scopeOrder: t.scopeOrder ?? null,
+    scopeIndex: t.scopeIndex || 0,
   }));
   return await page.evaluate((ts) => {
     const resolved = [];
     const unresolved = [];
-    // Selector + index + levelsUp — see "How a target resolves to an element" in index-json.mjs.
+    // Selector + index + levelsUp (+ scope) — see "How a target resolves to an element" in index-json.mjs.
+    const byOrder = new Map();
     const resolveTarget = (t) => {
+      const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
       let list;
       try {
-        list = document.querySelectorAll(t.normalized);
+        list = (scope || document).querySelectorAll(t.normalized);
       } catch {
         return null;
       }
-      let el = list[t.index || 0];
+      let el = list[scope ? t.scopeIndex || 0 : t.index || 0];
       for (let i = 0; el && i < (t.levelsUp || 0); i++) el = el.parentElement;
       return el || null;
     };
     for (const t of ts) {
       const el = resolveTarget(t);
+      if (el) byOrder.set(t.order, el);
       if (el) {
         el.setAttribute("data-sel-comp-id", String(t.order));
         el.classList.add("__sel_comp__");
