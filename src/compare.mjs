@@ -47,11 +47,18 @@
  *                   scoring one component would re-base the freeze and make the
  *                   new report incomparable with every earlier one. The report
  *                   names what it dropped rather than dropping it silently.
+ *   --accepted    = a file of accepted differences (lib/accepted.mjs): an element
+ *                   whose page, componentKey and the text of BOTH sides match an
+ *                   entry scores 100 and is listed under "Accepted"; any change to
+ *                   either side scores it again and reports the entry as stale.
+ *                   Every diff carries `prodPrint` / `stagePrint` in report.json,
+ *                   which is what `migration-validate accept` writes entries from.
  */
 import fs from "fs";
 import path from "path";
 import { elementScore } from "./lib/lcs.mjs";
 import { parseExcludedComponents } from "./lib/index-json.mjs";
+import { fingerprint, loadAccepted, findAccepted, staleAccepted } from "./lib/accepted.mjs";
 import {
   parseArgs,
   requireArg,
@@ -92,6 +99,8 @@ setLinkTargetRewrites(parseLinkTargetRewrites(args["link-target-rewrite"]));
 // Rendering names not to score, on both sides. See the header: this is the frozen-dataset
 // counterpart of capture's --exclude-components, and it is reported rather than silent.
 const excludeComponents = parseExcludedComponents(args["exclude-components"]);
+// Accepted differences - see lib/accepted.mjs and the header.
+const accepted = loadAccepted(args["accepted"]);
 const isExcludedComponent = (name) =>
   excludeComponents.size > 0 && excludeComponents.has(String(name ?? "").trim().toLowerCase());
 
@@ -190,7 +199,7 @@ function collectDiffs(reportPages) {
  * actual-only ("extra-on-stage") components. `index` is the componentKey and
  * `name` the rendering.
  */
-function scoreV2Page(slug) {
+function scoreV2Page(slug, pagePath) {
   const exp = readComponentDataset(path.join(expectedDir, slug));
   const act = readComponentDataset(path.join(actualDir, slug));
   const elements = [];
@@ -205,6 +214,15 @@ function scoreV2Page(slug) {
       const { prod, stage } = diffExcerpts(p, s);
       el.prodExcerpt = p ? prod : "(missing on prod)";
       el.stageExcerpt = s ? stage : "(missing on stage)";
+      // The diff's identity for --accepted: the exact text of each side, as compared.
+      el.prodPrint = fingerprint(p);
+      el.stagePrint = fingerprint(s);
+      const hit = findAccepted(accepted, pagePath, key, el.prodPrint, el.stagePrint);
+      if (hit) {
+        el.rawScore = score;
+        el.score = 100;
+        el.accepted = hit.reason || "accepted";
+      }
     }
     elements.push(el);
   };
@@ -329,7 +347,7 @@ for (const pagePath of prod200Paths) {
     continue;
   }
 
-  const elements = scoreV2Page(slug);
+  const elements = scoreV2Page(slug, pagePath);
 
   if (elements.length === 0) {
     noComponentPages.push({ path: pagePath });
@@ -369,6 +387,8 @@ const diffElements = pages.flatMap((p) =>
 // extra-on-stage). Reported alongside the diff count — a diff at 0 is a
 // different kind of problem from a diff at 98.
 const zeroElements = diffElements.filter((e) => e.score <= 0).length;
+const acceptedElements = pages.flatMap((p) => p.elements.filter((e) => e.accepted).map((e) => ({ page: p.path, ...e })));
+const acceptedStale = staleAccepted(accepted);
 
 // ---------- regression diff vs the previous report ----------
 // (`prev` was loaded above, before the failed-only page-set restriction.)
@@ -596,6 +616,27 @@ if (stageNon200.length) {
 }
 lines.push("");
 
+if (accepted.file) {
+  lines.push(`## Accepted differences (${acceptedElements.length}) — scored 100, listed in ${path.basename(accepted.file)}`);
+  lines.push("");
+  const byReason = new Map();
+  for (const e of acceptedElements) byReason.set(e.accepted, (byReason.get(e.accepted) || 0) + 1);
+  if (byReason.size) {
+    lines.push("| diffs | reason |");
+    lines.push("|---|---|");
+    for (const [reason, n] of [...byReason.entries()].sort((a, b) => b[1] - a[1])) lines.push(`| ${n} | ${reason} |`);
+  } else {
+    lines.push("None matched.");
+  }
+  lines.push("");
+  if (acceptedStale.length) {
+    lines.push(`### Stale accepted entries (${acceptedStale.length}) — the diff changed or is gone; scored again if still differing`);
+    lines.push("");
+    for (const e of acceptedStale) lines.push(`- ${e.page} - ${e.name || e.key} - ${e.reason || ""}`);
+    lines.push("");
+  }
+}
+
 lines.push(`## Per-page scores (worst first)`);
 lines.push("");
 lines.push("| score | elements | diffs | page |");
@@ -652,6 +693,9 @@ writeJson(path.join(reportDir, "report.json"), {
   stageNon200,
   statusMismatches: statusMismatches.length,
   previewBypassed: previewBypassed.length,
+  accepted: accepted.file
+    ? { file: accepted.file, entries: accepted.byKey.size, matched: acceptedElements.length, stale: acceptedStale }
+    : undefined,
   comparison,
   pages,
 });

@@ -39,6 +39,7 @@ migration-validate <command> [options]
 
   capture              Crawl a site; record per-component innerText and/or screenshots
   compare              Score actual vs expected innerText; write report.md/.json
+  accept               Add diffs of a compare report to an accepted-differences file
   compare-screenshots  Pixel-diff the captured screenshots; write report-screenshots.md/.json
   report-viewer        Serve the interactive viewer over both reports + the datasets
   md-to-pdf            Render generated Markdown reports to PDF (bundled Chromium)
@@ -122,6 +123,7 @@ migration-validate compare --expected ./expected-v2 --actual ./actual-v2 \
 | `--include /a,/b` | Allowlist of paths the frontend covers so far: everything else is out of scope entirely. Empty = whole site. |
 | `--link-target-rewrite "<pattern>=><replacement>,…"` | Regex rewrites applied to the **target** of every link annotation, on both sides. See *Rewriting link targets*. |
 | `--exclude-components <names>` | Rendering names left out of the score, on both sides. The capture-time flag of the same name, one layer later — see *Excluding a component*. |
+| `--accepted <file>` | Accepted differences: listed diffs score 100 and are reported apart, while both sides stay exactly as accepted. See *Accepted differences*. |
 | `--missing-words <n>` | Component report: trim a one-sided component's text to N words (`0` = full, default 8). |
 | `--only-failed` / `--prev-report <path>` | Score only the previously-failing subset. |
 
@@ -438,6 +440,37 @@ for `load` + the scope selector + a short settle. Page status is taken from a di
 **without following redirects** — a 3xx counts as "not 200" and is reported as such, and its
 `Location` is recorded in the page's record (`location`; a path when it stays on the page's own
 origin, the full URL when it leaves it).
+
+### Accepted differences
+
+Some differences are looked at and deliberately not fixed: a legacy bug the migration corrects,
+chrome of a legacy product with no counterpart, data the export cannot give back. When a whole
+class of them is one regex over link targets, `--link-target-rewrite` is the tool. The rest -
+one element on one page - goes in an **accepted-differences file**:
+
+```json
+{ "version": 1,
+  "entries": [ { "page": "/en-cn/x", "key": "<componentKey>", "name": "<rendering>",
+                 "prod": "<fingerprint>", "stage": "<fingerprint>", "reason": "why it is not fixed" } ] }
+```
+
+`prod` / `stage` are fingerprints (16 hex of sha1) of each side's compared text, after every
+normalization and rewrite. `compare --accepted <file>` scores an element whose page, key and BOTH
+fingerprints match an entry as 100 (keeping `rawScore` and the `accepted` reason on it in
+report.json) and lists the matches in report.md under *Accepted differences*, by reason. Change
+either side by one character and the entry no longer matches: the element is scored again and the
+entry is listed as **stale**. So an accepted diff cannot hide a regression, and the file only ever
+describes diffs exactly as someone accepted them.
+
+Every diff in report.json carries `prodPrint` / `stagePrint`, which is what `accept` reads:
+
+```
+migration-validate accept --report <report.json> --accepted <file> --reason "<why>"
+    [--page <glob>] [--component <name|/regex/>] [--max-score <n>] [--dry-run]
+```
+
+It adds (or, for the same page + key, replaces) one entry per matching diff. Filter narrowly and
+`--dry-run` first: every diff it matches is accepted as it stands.
 
 ---
 

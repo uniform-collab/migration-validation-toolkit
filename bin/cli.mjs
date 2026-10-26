@@ -28,6 +28,10 @@ const COMMANDS = {
     module: "src/compare.mjs",
     summary: "Score an actual innerText dataset against the expected one; write report.md/.json.",
   },
+  accept: {
+    module: "src/accept.mjs",
+    summary: "Add diffs of a compare report to an accepted-differences file (compare --accepted).",
+  },
   "compare-screenshots": {
     module: "src/compare-screenshots.mjs",
     summary: "Pixel-diff the captured component screenshots; write report-screenshots.md/.json.",
