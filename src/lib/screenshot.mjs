@@ -382,6 +382,107 @@ export async function waitForLayoutStable(page, order, pollMs, maxMs) {
 }
 
 /**
+ * The host's shot rect in DOCUMENT coordinates, rounded the way the shot is cut, plus the
+ * viewport size. Null when the host is gone.
+ */
+async function shotGeom(page, order) {
+  return await page
+    .evaluate((o) => {
+      const host = document.querySelector(`[data-sel-comp-id="${o}"]`);
+      if (!host) return null;
+      const b = host.getBoundingClientRect();
+      // Playwright's own rounding (helper.enclosingIntRect), reproduced verbatim so the
+      // stitched image is the SAME size as the element shot down to the pixel - `Math.round`
+      // on the width lands 1px short about half the time, and the compare treats a >2px size
+      // disagreement as content.
+      const x = Math.floor(b.x + window.scrollX + 1e-3);
+      const y = Math.floor(b.y + window.scrollY + 1e-3);
+      const x2 = Math.ceil(b.x + window.scrollX + b.width - 1e-3);
+      const y2 = Math.ceil(b.y + window.scrollY + b.height - 1e-3);
+      return { x, y, w: x2 - x, h: y2 - y, vw: window.innerWidth, vh: window.innerHeight };
+    }, order)
+    .catch(() => null);
+}
+
+/**
+ * Scroll so the host's top-left sits where the shot's first band expects it (the viewport's
+ * top-left, clamped by the document's end). Returns true only when the page actually moved:
+ * a clamped or already-correct position is not a scroll and fires no scroll event.
+ */
+async function scrollToShotPosition(page, order) {
+  return await page
+    .evaluate((o) => {
+      const host = document.querySelector(`[data-sel-comp-id="${o}"]`);
+      if (!host) return false;
+      const b = host.getBoundingClientRect();
+      const x0 = window.scrollX;
+      const y0 = window.scrollY;
+      window.scrollTo(Math.max(0, Math.floor(b.x + x0 + 1e-3)), Math.floor(b.y + y0 + 1e-3));
+      return window.scrollX !== x0 || window.scrollY !== y0;
+    }, order)
+    .catch(() => false);
+}
+
+/**
+ * Wait for layout stability AT THE SCROLL POSITION THE SHOT IS TAKEN FROM, and return what
+ * waitForLayoutStable returned there.
+ *
+ * Why. Measuring the element at one scroll position and shooting it at another is only safe on a
+ * page that does not react to scrolling. Many do: a sticky in-page nav that a scroll handler
+ * takes out of the flow once the page passes its offset (Bootstrap 3's affix plugin, the
+ * classic case) moves everything below it by the bar's height - AFTER the stability gate said
+ * "still", and inside the shot. The retry then measures at the new position and shoots at yet
+ * another, so the pair oscillates into `unstable-layout`. Scrolling first, letting the page
+ * react, and only then waiting for stillness makes the gate and the shot see the same layout.
+ *
+ * A move the gate absorbs can change the shot position itself (the element moved up by the
+ * bar's height), so it re-positions and re-waits, a bounded number of rounds; once the element
+ * is where the shot expects it no further scroll happens, and captureStitched's first band does
+ * not scroll either.
+ */
+export async function settleAtShotPosition(page, order, pollMs, maxMs, { settleMs = 50, maxRounds = 3 } = {}) {
+  let stable = null;
+  for (let round = 0; round < maxRounds; round++) {
+    const moved = await scrollToShotPosition(page, order);
+    if (!moved && stable) return stable;
+    if (moved) await page.waitForTimeout(settleMs).catch(() => {});
+    stable = await waitForLayoutStable(page, order, pollMs, maxMs);
+  }
+  return stable;
+}
+
+/**
+ * Opt-in (`--freeze-scroll-handlers`): put the page back at the top, let its scroll handlers
+ * react once, then swallow every later `scroll` event before any page listener sees it, so the
+ * per-element scrolling of the shot pass cannot change the layout.
+ *
+ * Why. A page that changes layout on scroll (a sticky bar re-docked by a scroll handler) has no
+ * single layout to compare: the shot shows whichever state the last scroll left it in. A side
+ * that runs no scripts at all - a static copy of the legacy site - is always in its top-of-page
+ * state, so pinning the other side to that state makes the two comparable. Capture-phase
+ * listeners on window AND document: window is the outermost target of the capture phase for
+ * element scrolls, document is where a viewport scroll is dispatched. Must run before
+ * freezeAnimations, which stubs the requestAnimationFrame/setTimeout the frame wait uses.
+ * IntersectionObserver-driven lazy loading is not a scroll listener and keeps working.
+ */
+export async function freezeScrollHandlers(page) {
+  await page
+    .evaluate(async () => {
+      window.scrollTo(0, 0);
+      // Scroll events are dispatched in the next rendering update; two frames guarantee the
+      // page's handlers have seen the return to the top. Capped in case frames are throttled.
+      await Promise.race([
+        new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+        new Promise((r) => setTimeout(r, 250)),
+      ]);
+      const stop = (e) => e.stopImmediatePropagation();
+      window.addEventListener("scroll", stop, true);
+      document.addEventListener("scroll", stop, true);
+    })
+    .catch(() => {});
+}
+
+/**
  * Take the element's picture WITHOUT `elementHandle.screenshot()`, by scrolling it past
  * the viewport a band at a time and stitching the viewport rasters together.
  *
@@ -413,22 +514,7 @@ export async function waitForLayoutStable(page, order, pollMs, maxMs) {
  */
 export async function captureStitched(page, order, sharp, opts) {
   const { maxHeight = 9000, bandSettleMs = 50 } = opts || {};
-  const geom = await page
-    .evaluate((o) => {
-      const host = document.querySelector(`[data-sel-comp-id="${o}"]`);
-      if (!host) return null;
-      const b = host.getBoundingClientRect();
-      // Playwright's own rounding (helper.enclosingIntRect), reproduced verbatim so the
-      // stitched image is the SAME size as the element shot down to the pixel - `Math.round`
-      // on the width lands 1px short about half the time, and the compare treats a >2px size
-      // disagreement as content.
-      const x = Math.floor(b.x + window.scrollX + 1e-3);
-      const y = Math.floor(b.y + window.scrollY + 1e-3);
-      const x2 = Math.ceil(b.x + window.scrollX + b.width - 1e-3);
-      const y2 = Math.ceil(b.y + window.scrollY + b.height - 1e-3);
-      return { x, y, w: x2 - x, h: y2 - y, vw: window.innerWidth, vh: window.innerHeight };
-    }, order)
-    .catch(() => null);
+  const geom = await shotGeom(page, order);
   if (!geom || geom.w <= 0 || geom.h <= 0) return null;
 
   const height = Math.min(geom.h, maxHeight);
@@ -445,12 +531,18 @@ export async function captureStitched(page, order, sharp, opts) {
       const bandW = Math.min(geom.vw, geom.w - left);
       const scrolled = await page.evaluate(
         ([targetX, targetY]) => {
+          const x0 = window.scrollX;
+          const y0 = window.scrollY;
           window.scrollTo(targetX, targetY);
-          return { sx: window.scrollX, sy: window.scrollY };
+          return { sx: window.scrollX, sy: window.scrollY, moved: window.scrollX !== x0 || window.scrollY !== y0 };
         },
         [Math.max(0, geom.x + left), geom.y + top]
       );
-      if (multiTile) await page.waitForTimeout(bandSettleMs).catch(() => {});
+      // A scroll is followed by a frame's worth of the page's own reaction to it (scroll
+      // handlers, a sticky bar re-docking) - for a single band too, or that reaction lands
+      // inside the raster. The caller has normally put the page at this position already
+      // (settleAtShotPosition), so the first band does not scroll and costs nothing here.
+      if (multiTile || scrolled.moved) await page.waitForTimeout(bandSettleMs).catch(() => {});
 
       // Where this tile sits in the viewport, clamped to it.
       const clipX = geom.x + left - scrolled.sx;
@@ -503,7 +595,10 @@ async function cropImageHeightIfNeeded(imgPath, maxHeight) {
  * harness refusing to publish a shot it could not take cleanly. All three reach the
  * compare through the same `skipped` list and score as "not compared".
  *
- * @returns {Promise<{captured: {order,key,name}[], skippedEmpty: object[]}>}
+ * `imageTimeouts` lists the keys of shots taken although an image under the element had not
+ * loaded and decoded within the budget (their `captured` entry carries `imagesTimedOut`).
+ *
+ * @returns {Promise<{captured: {order,key,name,imagesTimedOut?}[], skippedEmpty: object[], imageTimeouts: string[]}>}
  */
 export async function captureResolvedTargets(page, targets, resolution, pageDir, opts) {
   const {
@@ -522,6 +617,7 @@ export async function captureResolvedTargets(page, targets, resolution, pageDir,
   const byOrder = new Map(targets.map((t) => [t.order, t]));
   const captured = [];
   const skippedEmpty = [];
+  const imageTimeouts = [];
 
   for (const order of resolution.resolved) {
     const target = byOrder.get(order);
@@ -602,21 +698,41 @@ export async function captureResolvedTargets(page, targets, resolution, pageDir,
       // image-decode wait below, which only covers <img> that already exist.
       if (quiescer) await quiescer.idle(idleQuietMs, idleMaxMs);
 
-      await Promise.race([
-        element.evaluate(async (el) => {
-          const images = el.querySelectorAll("img");
-          await Promise.all(
-            Array.from(images).map((img) => {
-              if (img.complete) return Promise.resolve();
-              return new Promise((resolve) => {
-                img.onload = () => resolve();
-                img.onerror = () => resolve();
-              });
-            })
-          );
-        }),
-        page.waitForTimeout(5000),
+      // Every image under the host loaded AND decoded, or the shot is marked degraded.
+      // `loading="lazy"` images the browser has not started (a carousel slide outside the
+      // viewport, which scrollIntoView never brings close enough) are switched to eager first,
+      // or they would sit incomplete until the timeout and be shot blank. `complete` alone is
+      // not "painted": decode() is what guarantees the pixels exist. Listeners, not
+      // `img.onload =`, so a page's own onload handler (a lazy loader's) is not replaced.
+      const imagesTimedOut = await Promise.race([
+        element
+          .evaluate(async (el) => {
+            const images = Array.from(el.querySelectorAll("img"));
+            for (const img of images) if (img.getAttribute("loading") === "lazy") img.loading = "eager";
+            await Promise.all(
+              images.map(async (img) => {
+                if (!img.complete) {
+                  await new Promise((resolve) => {
+                    img.addEventListener("load", resolve, { once: true });
+                    img.addEventListener("error", resolve, { once: true });
+                  });
+                }
+                if (img.naturalWidth > 0 && typeof img.decode === "function") {
+                  try {
+                    await img.decode();
+                  } catch {}
+                }
+              })
+            );
+            return false;
+          })
+          .catch(() => false),
+        page.waitForTimeout(5000).then(() => true, () => true),
       ]);
+      if (imagesTimedOut) {
+        console.warn(`  images under ${key} still loading after 5s - shot marked degraded`);
+        imageTimeouts.push(key);
+      }
       await page.waitForTimeout(200);
 
       const box = await element.boundingBox();
@@ -636,7 +752,7 @@ export async function captureResolvedTargets(page, targets, resolution, pageDir,
       let shotRect = null;
       let unstable = null;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const before = await waitForLayoutStable(page, order, stablePollMs, stableMaxMs);
+        const before = await settleAtShotPosition(page, order, stablePollMs, stableMaxMs);
         // Stitching needs sharp to composite the bands; with sharp unavailable (it is an
         // optional dependency here) fall back to the element shot rather than skip the page.
         let stitched = null;
@@ -675,7 +791,7 @@ export async function captureResolvedTargets(page, targets, resolution, pageDir,
       }
 
       if (sharp) await cropImageHeightIfNeeded(filePath, maxHeight);
-      captured.push({ order, key, name: target.name });
+      captured.push(imagesTimedOut ? { order, key, name: target.name, imagesTimedOut: true } : { order, key, name: target.name });
     } catch (err) {
       console.warn(`  failed to screenshot ${key}: ${String(err.message || err).slice(0, 200)}`);
     } finally {
@@ -683,5 +799,5 @@ export async function captureResolvedTargets(page, targets, resolution, pageDir,
     }
   }
 
-  return { captured, skippedEmpty };
+  return { captured, skippedEmpty, imageTimeouts };
 }

@@ -39,6 +39,7 @@ import {
 } from "./lib/index-json.mjs";
 import {
   freezeAnimations,
+  freezeScrollHandlers,
   captureFullPage,
   removeOverlayElements,
   resolveAndTagTargets,
@@ -231,6 +232,11 @@ const shotSettleMax = Math.max(0, parseInt(args["shot-settle-max"] ?? "5000", 10
 // geometry is identical either way, so this can be turned off without re-capturing a
 // baseline; 0 = use elementHandle.screenshot() as before.
 const shotStitch = !(args["shot-stitch"] === "0" || args["shot-stitch"] === false);
+// Opt-in: once the page has settled, put it back at the top and swallow every later scroll
+// event, so a page whose layout reacts to scrolling (a sticky bar a scroll handler takes out of
+// the flow) is shot in its top-of-page layout - the only layout a scriptless copy of the legacy
+// site ever has. Off by default: it changes what a scroll-reactive page looks like in the shot.
+const freezeScroll = args["freeze-scroll-handlers"] === true || ["1", "true"].includes(String(args["freeze-scroll-handlers"] ?? "").toLowerCase());
 let sharpMod = null;
 
 // Header-only bypass on purpose: adding x-vercel-set-bypass-cookie makes Vercel
@@ -836,6 +842,9 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
         // Recorded only when the budget ran out, so the page marker says why its shots may move.
         if (settle && !settle.settled) rec.pageSettle = settle;
       }
+      // After the settle (the page has had its lazy-load scroll and reacted to it), before
+      // freezeAnimations (the frame wait needs the real requestAnimationFrame).
+      if (freezeScroll) await freezeScrollHandlers(page);
       await freezeAnimations(page);
       await removeOverlayElements(page, overlaySelectors);
     }
@@ -959,7 +968,7 @@ async function captureV2(page, pagePath, rec, quiescer) {
     if (sharpMod === null) sharpMod = await getSharp();
     const resolution = await resolveAndTagTargets(page, targets, rebaseRules);
     const shotsPageDir = path.join(shotsOut, pathToSlugDir(pagePath));
-    const { captured, skippedEmpty } = await captureResolvedTargets(
+    const { captured, skippedEmpty, imageTimeouts } = await captureResolvedTargets(
       page,
       targets,
       resolution,
@@ -990,6 +999,9 @@ async function captureV2(page, pagePath, rec, quiescer) {
     // visible in the manifest, rather than reading as a page full of tiny elements.
     const unstable = skippedEmpty.filter((s) => s.reason === "unstable-layout").length;
     if (unstable) rec.shotsUnstable = unstable;
+    // Shots taken although an image under the element had not loaded and decoded within the
+    // budget: they may show it blank, so the marker names them instead of passing them as clean.
+    if (imageTimeouts?.length) rec.shotsImagesTimedOut = imageTimeouts;
   }
 
   return rec;

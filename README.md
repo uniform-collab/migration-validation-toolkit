@@ -101,6 +101,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--shot-stable-poll` / `--shot-stable-max` | Layout-stability gate (ms; `0` disables). |
 | `--shot-settle-quiet` / `--shot-settle-max` | Page-settled gate, once per page before the shots: web fonts, images still loading, then the page height unchanged for the quiet time (ms; defaults 500 / 5000; `--shot-settle-max 0` disables). A page whose budget ran out carries `pageSettle` in its marker. |
 | `--shot-stitch 0` | Fall back to `elementHandle.screenshot()` instead of tile+stitch. |
+| `--freeze-scroll-handlers` | Opt-in. After the page settles, scroll to the top and swallow every later `scroll` event, so a page whose layout reacts to scrolling (a sticky bar re-docked by a scroll handler) is shot in its top-of-page layout. See [below](#--freeze-scroll-handlers-opt-in-default-off). |
 | `--full-page-shot false` / `--full-page-max-height <px>` / `--full-page-quality <1-100>` | The per-page full-page JPEG (on by default whenever shots are; clipped at 16000 px, quality 70). Never scored — see [Full-page shot](#full-page-shot-not-scored). |
 
 > **Both sides must use identical gate values.** Different settling rules on the expected and
@@ -642,6 +643,37 @@ failure is not published — the component goes into the page's `skipped` list w
 
 Defaults: poll 50 ms, ceiling 2000 ms. The poll interval doubles as the settle wait, so on an
 already-still page a shot costs one extra sleep and two round-trips.
+
+**The gate runs at the scroll position the shot is taken from** (`settleAtShotPosition`). A page
+that reacts to scrolling — a sticky in-page nav that a scroll handler takes out of the flow once the
+page passes its offset (Bootstrap 3 affix) — moves everything below it as soon as the shot's own
+scroll lands. Measured at one position and shot at another, the element moved *after* the gate said
+"still" and the retry repeated the mismatch. So the page is scrolled to the first tile's position
+first, given a frame to react, and only then waited on; if that move changed the shot position, it
+re-positions (at most three rounds). The first tile then needs no scroll of its own. On a page that
+does not react to scrolling the shots are byte-identical to before. A layout that flips back and
+forth with the scroll position (an element right under such a bar) still never settles and is
+skipped as `unstable-layout` — `--freeze-scroll-handlers` is the answer for that.
+
+#### `--freeze-scroll-handlers` (opt-in, default off)
+
+After the page-settled gate and before the animation freeze, scroll back to the top, wait two
+frames so the page's scroll handlers see it, then add capture-phase `scroll` listeners on `window`
+and `document` that call `stopImmediatePropagation()`. Every later scroll of the shot pass is
+invisible to the page, so a scroll-reactive page is shot in its **top-of-page layout** — the only
+layout a side that runs no scripts (a static copy of the legacy site) ever has. Use it on both sides
+(on a scriptless side it is a no-op). It changes what such a page looks like in the shot, which is
+why it is off by default. IntersectionObserver-based lazy loading is not a scroll listener and keeps
+working; a scroll listener on an inner scroller (rare in shots) is blocked too.
+
+### Images under a component
+
+Before each component shot, every `<img loading="lazy">` under the element is switched to eager
+(a carousel slide outside the viewport is never started by the browser otherwise), and each image is
+awaited until it has loaded **and** `decode()`d — `complete` alone does not mean the pixels exist.
+The budget is 5 s; a shot taken after it ran out is still published, but marked: the component's
+entry in the shots `.components.json` carries `imagesTimedOut: true` and the page marker lists the
+keys in `shotsImagesTimedOut`, so a blank image there reads as a capture problem, not a rendering one.
 
 ### How a component is photographed (tile + stitch)
 
