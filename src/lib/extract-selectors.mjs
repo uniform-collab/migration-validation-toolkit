@@ -26,6 +26,8 @@ export function collectComponentTexts(cfg) {
 
   // Selector + index + levelsUp (+ scope) — see "How a target resolves to an element" in index-json.mjs.
   const byOrder = new Map();
+  // Targets whose element is trustworthy as a scope: their count matched the legacy page's.
+  const trusted = new Set();
   const resolveTarget = (t) => {
     let list;
     try {
@@ -34,12 +36,15 @@ export function collectComponentTexts(cfg) {
       return null;
     }
     let index = t.index || 0;
-    // The scope only when the page-wide count has drifted from the legacy page's: while it matches,
-    // the page-wide ordinal names the same element and is the one the expected side was taken with.
-    const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
-    if (scope && !(t.matchCount > 0 && list.length === t.matchCount)) {
-      list = scope.querySelectorAll(t.sel);
+    // The page-wide ordinal while the page-wide count matches the legacy page's. The scope only when
+    // it has drifted AND the enclosing target was itself found reliably - a scope found by a drifted
+    // ordinal is the wrong element, and everything resolved inside it cascades.
+    if (t.matchCount > 0 && list.length === t.matchCount) {
+      trusted.add(t.order);
+    } else if (t.scopeOrder != null && trusted.has(t.scopeOrder) && byOrder.has(t.scopeOrder)) {
+      list = byOrder.get(t.scopeOrder).querySelectorAll(t.sel);
       index = t.scopeIndex || 0;
+      if (t.scopeMatchCount > 0 && list.length === t.scopeMatchCount) trusted.add(t.order);
     }
     let el = list[index];
     for (let i = 0; el && i < (t.levelsUp || 0); i++) el = el.parentElement;

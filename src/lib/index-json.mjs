@@ -303,6 +303,7 @@ export function extractCaptureTargets(indexJson) {
           // How many elements the selector matched on the legacy page (CssSelectorMatchCount): while
           // the migrated page has as many, the page-wide index is used and the scope is not.
           matchCount: Number.isInteger(r.CssSelectorMatchCount) ? r.CssSelectorMatchCount : 0,
+          scopeMatchCount: Number.isInteger(r.CssSelectorScopeMatchCount) ? r.CssSelectorScopeMatchCount : 0,
           depth,
           placeholderKey,
           rootPlaceholderKey,
@@ -424,21 +425,22 @@ export function normalizeSelector(selector, rules) {
  *
  *     querySelectorAll(selector)[index]  then  .parentElement × levelsUp
  *
- * or, when the target carries a scope (`scopeOrder`, from CssSelectorScopeUp), that target
- * resolved on this page, AND the page-wide match count differs from the legacy page's (`matchCount`,
- * CssSelectorMatchCount):
+ * or, when the page-wide match count differs from the legacy page's (`matchCount`,
+ * CssSelectorMatchCount) and the target carries a scope (`scopeOrder`, from CssSelectorScopeUp) that
+ * was itself found RELIABLY:
  *
  *     scopeElement.querySelectorAll(selector)[scopeIndex]  then  .parentElement × levelsUp
  *
  * The page-wide index only names the same element while every earlier match on the page is
  * reproduced one for one, and a count that differs says that has not happened; the scoped one counts
  * only the matches inside the enclosing rendering, so a wrapper added or dropped elsewhere no longer
- * shifts it onto a neighbour. While the count matches, the page-wide index is kept: it is how the
- * expected side resolved, and a migrated parent element that is shaped differently would otherwise
- * move a correct match (on WSP, 2026-10-27, using the scope always fixed 38 instances and broke 7
- * that the page-wide index had right). On the legacy page the count always matches, so the expected side is
- * unchanged. A scoped index that finds nothing leaves the target unresolved. Targets are resolved in
- * `order` (DFS), so the scope is always done first.
+ * shifts it onto a neighbour. A target is reliable when its own count matched the legacy page's -
+ * page-wide, or inside its scope (`scopeMatchCount`). A scope found through a drifted ordinal is the
+ * wrong element, and everything resolved inside it cascades: on WSP (2026-10-27) a Content Wrapper
+ * two scopes below a top-level `.section-full` #1 of 4 (no scope of its own, so a drifted page-wide
+ * ordinal) stopped resolving, where its own page-wide index had it right. Otherwise the page-wide index is used,
+ * as without a scope. On the legacy page the count always matches, so the expected side is unchanged.
+ * Targets are resolved in `order` (DFS), so the scope is always done first.
  *
  * `querySelector` alone is wrong: the migration deliberately emits selectors that may match a few
  * elements and disambiguates by index. The two in-page resolvers (`collectComponentTexts` for
