@@ -27,14 +27,21 @@ export function collectComponentTexts(cfg) {
   // Selector + index + levelsUp (+ scope) — see "How a target resolves to an element" in index-json.mjs.
   const byOrder = new Map();
   const resolveTarget = (t) => {
-    const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
     let list;
     try {
-      list = (scope || document).querySelectorAll(t.sel);
+      list = document.querySelectorAll(t.sel);
     } catch {
       return null;
     }
-    let el = list[scope ? t.scopeIndex || 0 : t.index || 0];
+    let index = t.index || 0;
+    // The scope only when the page-wide count has drifted from the legacy page's: while it matches,
+    // the page-wide ordinal names the same element and is the one the expected side was taken with.
+    const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
+    if (scope && !(t.matchCount > 0 && list.length === t.matchCount)) {
+      list = scope.querySelectorAll(t.sel);
+      index = t.scopeIndex || 0;
+    }
+    let el = list[index];
     for (let i = 0; el && i < (t.levelsUp || 0); i++) el = el.parentElement;
     return el || null;
   };

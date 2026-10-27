@@ -945,6 +945,7 @@ async function captureV2(page, pagePath, rec, quiescer) {
       levelsUp: t.levelsUp || 0,
       scopeOrder: t.scopeOrder ?? null,
       scopeIndex: t.scopeIndex || 0,
+      matchCount: t.matchCount || 0,
       excluded: t.excluded || false,
     }));
     const res = await page.evaluate(collectComponentTexts, { targets: payload });

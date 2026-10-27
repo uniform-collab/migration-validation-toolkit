@@ -250,6 +250,7 @@ export async function resolveAndTagTargets(page, targets, rebaseRules) {
     levelsUp: t.levelsUp || 0,
     scopeOrder: t.scopeOrder ?? null,
     scopeIndex: t.scopeIndex || 0,
+    matchCount: t.matchCount || 0,
   }));
   return await page.evaluate((ts) => {
     const resolved = [];
@@ -257,14 +258,19 @@ export async function resolveAndTagTargets(page, targets, rebaseRules) {
     // Selector + index + levelsUp (+ scope) — see "How a target resolves to an element" in index-json.mjs.
     const byOrder = new Map();
     const resolveTarget = (t) => {
-      const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
       let list;
       try {
-        list = (scope || document).querySelectorAll(t.normalized);
+        list = document.querySelectorAll(t.normalized);
       } catch {
         return null;
       }
-      let el = list[scope ? t.scopeIndex || 0 : t.index || 0];
+      let index = t.index || 0;
+      const scope = t.scopeOrder == null ? null : byOrder.get(t.scopeOrder);
+      if (scope && !(t.matchCount > 0 && list.length === t.matchCount)) {
+        list = scope.querySelectorAll(t.normalized);
+        index = t.scopeIndex || 0;
+      }
+      let el = list[index];
       for (let i = 0; el && i < (t.levelsUp || 0); i++) el = el.parentElement;
       return el || null;
     };

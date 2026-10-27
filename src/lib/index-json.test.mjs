@@ -35,6 +35,7 @@ test("a scoped selector names the enclosing rendering's target, counting renderi
   assert.equal(teaser.scopeOrder, section.order);
   assert.equal(teaser.scopeIndex, 1);
   assert.equal(teaser.index, 5);
+  assert.equal(teaser.matchCount, 0);
   assert.equal(section.scopeOrder, null);
 });
 
