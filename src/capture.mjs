@@ -28,6 +28,7 @@ import { collectComponentTexts } from "./lib/extract-selectors.mjs";
 import {
   buildUrlToIndexMap,
   loadCaptureTargets,
+  loadUnselected,
   filterBodyOnly,
   normalizeSelector,
   parseRebaseRules,
@@ -957,7 +958,10 @@ async function captureV2(page, pagePath, rec, quiescer) {
       fs.writeFileSync(path.join(pageDir, `${it.key}.txt`), it.text, "utf8");
       components.push({ order: it.order, key: it.key, name: it.name });
     }
-    writeJson(path.join(pageDir, ".components.json"), { components });
+    // The renderings this index.json places nowhere: compare tells "the stage lost it" from "the
+    // selector was withdrawn after the other side was frozen" by them (see extractUnselected).
+    const unselected = loadUnselected(indexPath);
+    writeJson(path.join(pageDir, ".components.json"), unselected.length ? { components, unselected } : { components });
     rec.elements = res.items.length;
     rec.textChars = res.items.reduce((n, it) => n + normalizeText(it.text).length, 0);
     rec.resolved = payload.length - res.unresolved.length;

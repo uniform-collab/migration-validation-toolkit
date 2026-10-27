@@ -261,6 +261,7 @@ function chartSeverity(tags) {
     "minor-diff": "#8b949e",
     "extra-on-stage": "var(--bad)",
     "missing-on-stage": "var(--bad)",
+    "selector-withdrawn": "var(--warn)",
     "extra-in-migrated": "var(--bad)",
     "missing-in-migrated": "var(--bad)",
   };

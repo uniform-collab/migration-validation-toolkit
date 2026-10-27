@@ -328,6 +328,33 @@ export function extractCaptureTargets(indexJson) {
   return targets;
 }
 
+/**
+ * The renderings the presentation places nowhere on the legacy page (no CssSelector), keyed the way a
+ * capture target would be. A capture records them beside its components so `compare` can tell an
+ * element the stage lost from one whose selector was withdrawn after the expected side was frozen:
+ * the frozen dataset still holds text captured with the old selector, and no stage capture can
+ * ever produce it again. `locatedBy` is the locator's own reason (`absent`, ...) when it gives one.
+ */
+export function extractUnselected(indexJson) {
+  const out = [];
+  const walk = (renderings) => {
+    if (!Array.isArray(renderings)) return;
+    for (const r of renderings) {
+      if (!hasSelector(r) && r?.ID) {
+        out.push({ key: componentKey({ name: r.Name || "<unnamed>", id: r.ID }), name: r.Name || "<unnamed>", locatedBy: r.LocatedBy || "" });
+      }
+      if (Array.isArray(r?.Placeholders)) for (const ph of r.Placeholders) walk(ph.Renderings);
+    }
+  };
+  if (Array.isArray(indexJson?.Placeholders)) for (const ph of indexJson.Placeholders) walk(ph.Renderings);
+  return out;
+}
+
+export function loadUnselected(indexPath) {
+  const json = readJsonSafe(indexPath);
+  return json ? extractUnselected(json) : [];
+}
+
 export function loadCaptureTargets(indexPath) {
   const json = readJsonSafe(indexPath);
   if (!json) return [];

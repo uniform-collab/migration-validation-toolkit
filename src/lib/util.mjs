@@ -227,25 +227,29 @@ export function writeJson(file, data) {
 
 /**
  * Read a V2 page dir's keyed components: the ordered list from .components.json
- * plus a key→text map (from <componentKey>.txt). Returns { order, texts }.
+ * plus a key→text map (from <componentKey>.txt), and the key→locator-reason map of the
+ * renderings the capture's index.json placed nowhere (`unselected`, capture.mjs; empty for a
+ * dataset captured before it was recorded). Returns { order, texts, unselected }.
  */
 export function readComponentDataset(pageDir) {
   const order = [];
   const texts = new Map();
+  const unselected = new Map();
   const manifest = path.join(pageDir, ".components.json");
-  if (!fs.existsSync(manifest)) return { order, texts };
+  if (!fs.existsSync(manifest)) return { order, texts, unselected };
   let doc;
   try {
     doc = JSON.parse(fs.readFileSync(manifest, "utf8"));
   } catch {
-    return { order, texts };
+    return { order, texts, unselected };
   }
   for (const c of doc.components || []) {
     const file = path.join(pageDir, `${c.key}.txt`);
     order.push({ key: c.key, name: c.name });
     texts.set(c.key, fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "");
   }
-  return { order, texts };
+  for (const u of doc.unselected || []) unselected.set(u.key, u.locatedBy || "");
+  return { order, texts, unselected };
 }
 
 /**

@@ -239,6 +239,15 @@ function scoreV2Page(slug, pagePath) {
     seen.add(key);
     const push = isExcludedComponent(name) ? (k, n, ...rest) => pushExcluded(...rest) : pushPair;
     if (act.texts.has(key)) push(key, name, exp.texts.get(key), act.texts.get(key), null);
+    // The stage capture's index.json places this rendering nowhere any more: the expected text was
+    // frozen with a selector a later locator change withdrew. Still a 0 - it may be a real component
+    // the locator now misses - but named apart, so the cure (re-capture the page, or fix the
+    // locator) is not looked for in the migrated site.
+    else if (act.unselected.has(key)) {
+      push(key, name, exp.texts.get(key), "", "selector-withdrawn");
+      const el = elements[elements.length - 1];
+      if (el?.key === key) el.locatedBy = act.unselected.get(key);
+    }
     else push(key, name, exp.texts.get(key), "", "missing-on-stage");
   }
   for (const { key, name } of act.order) {
@@ -416,6 +425,9 @@ const diffElements = pages.flatMap((p) =>
 const zeroElements = diffElements.filter((e) => e.score <= 0).length;
 const acceptedElements = pages.flatMap((p) => p.elements.filter((e) => e.accepted).map((e) => ({ page: p.path, ...e })));
 const acceptedStale = staleAccepted(accepted);
+const withdrawnElements = pages.flatMap((p) =>
+  p.elements.filter((e) => e.tag === "selector-withdrawn").map((e) => ({ page: p.path, key: e.key, name: e.name, locatedBy: e.locatedBy }))
+);
 
 // ---------- regression diff vs the previous report ----------
 // (`prev` was loaded above, before the failed-only page-set restriction.)
@@ -668,6 +680,17 @@ if (accepted.file) {
   }
 }
 
+if (withdrawnElements.length) {
+  lines.push(`## Selector withdrawn since the expected capture (${withdrawnElements.length}) — scored 0`);
+  lines.push("");
+  lines.push("The frozen expected dataset holds these elements, but the index.json the stage was captured with places them nowhere on the legacy page any more (a locator change after the expected capture). Nothing on the stage can match them. If the old selector was a wrong guess, re-capture the page's expected copy; if the component is real on the legacy page, the locator lost it - fix the locator.");
+  lines.push("");
+  lines.push("| page | component | locator says |");
+  lines.push("|---|---|---|");
+  for (const e of withdrawnElements) lines.push(`| ${e.page} | ${e.name || e.key} | ${e.locatedBy || "no selector"} |`);
+  lines.push("");
+}
+
 lines.push(`## Per-page scores (worst first)`);
 lines.push("");
 lines.push("| score | elements | diffs | page |");
@@ -719,6 +742,7 @@ writeJson(path.join(reportDir, "report.json"), {
   notFoundOnStage: availability.notFound,
   elementsCompared: totalElements,
   elementsScoringZero: zeroElements,
+  selectorWithdrawn: withdrawnElements,
   excluded,
   excludedComponents: [...excludeComponents],
   noIndexPages,
@@ -806,7 +830,7 @@ writeJson(path.join(reportDir, "report.json"), {
       let expected = o.expected ?? "(missing on prod)";
       let actual = o.actual ?? "(missing on stage)";
       // Component present on only one side: trim the present side to N words.
-      if (o.tag === "missing-on-stage") expected = firstWords(expected, missingWords);
+      if (o.tag === "missing-on-stage" || o.tag === "selector-withdrawn") expected = firstWords(expected, missingWords);
       else if (o.tag === "extra-on-stage") actual = firstWords(actual, missingWords);
       cl.push(`${o.page} — score ${Math.floor(o.score)}${note}`);
       cl.push("```");
