@@ -457,22 +457,30 @@ function viewOverview() {
         )}</span> vs ${fmt(cmp.prevOverall)} (${esc(cmp.source || "prev")})`;
 
   // The score with the accepted differences and --exclude-components undone, under the
-  // headline (a report from an older toolkit has none).
+  // headline (a report from an older toolkit has none). A gap under 0.1 prints both with 3
+  // decimals, as the delta does, or the two would read as the same number.
+  const scoreDigits = (r) =>
+    r?.rawOverallScore != null && Math.abs(r.overallScore - r.rawOverallScore) > 0 &&
+    Math.abs(r.overallScore - r.rawOverallScore) < 0.1 ? 3 : 1;
   const rawLine = (r) =>
     r?.rawOverallScore != null
-      ?`<span class="raw">${fmt(r.rawOverallScore)}% (without exclusions)</span>`
+      ? `<span class="raw">${fmt(r.rawOverallScore, scoreDigits(r))}% (without exclusions)</span>`
       : "";
 
   const kpis = [
     kpi(
       "Content score",
-      m.content ? `<span class="s-${grade(m.content.overallScore)}">${fmt(m.content.overallScore)}%</span>` : "—",
+      m.content
+        ? `<span class="s-${grade(m.content.overallScore)}">${fmt(m.content.overallScore, scoreDigits(m.content))}%</span>`
+        : "—",
       deltaHtml + rawLine(m.content),
       "big"
     ),
     kpi(
       "Visual score",
-      m.visual ? `<span class="s-${grade(m.visual.overallScore)}">${fmt(m.visual.overallScore)}%</span>` : "—",
+      m.visual
+        ? `<span class="s-${grade(m.visual.overallScore)}">${fmt(m.visual.overallScore, scoreDigits(m.visual))}%</span>`
+        : "—",
       m.visual
         ? `${int(m.visual.componentsCompared)} shots · ${int(m.visual.componentsScoringZero)} at 0` + rawLine(m.visual)
         : "run 6400 to produce it",
