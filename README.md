@@ -472,7 +472,9 @@ fingerprints match an entry as 100 (keeping `rawScore` and the `accepted` reason
 report.json) and lists the matches in report.md under *Accepted differences*, by reason. Change
 either side by one character and the entry no longer matches: the element is scored again and the
 entry is listed as **stale**. So an accepted diff cannot hide a regression, and the file only ever
-describes diffs exactly as someone accepted them.
+describes diffs exactly as someone accepted them. An entry whose page this report does not compare
+(another suite's page, a page a failed-only run skipped) is not stale: it is only counted, as
+`accepted.outOfScope` in report.json and one line in report.md.
 
 Every diff in report.json carries `prodPrint` / `stagePrint`, which is what `accept` reads:
 

@@ -424,7 +424,7 @@ const diffElements = pages.flatMap((p) =>
 // different kind of problem from a diff at 98.
 const zeroElements = diffElements.filter((e) => e.score <= 0).length;
 const acceptedElements = pages.flatMap((p) => p.elements.filter((e) => e.accepted).map((e) => ({ page: p.path, ...e })));
-const acceptedStale = staleAccepted(accepted);
+const { stale: acceptedStale, outOfScope: acceptedOutOfScope } = staleAccepted(accepted, pages.map((p) => p.path));
 const withdrawnElements = pages.flatMap((p) =>
   p.elements.filter((e) => e.tag === "selector-withdrawn").map((e) => ({ page: p.path, key: e.key, name: e.name, locatedBy: e.locatedBy }))
 );
@@ -678,6 +678,10 @@ if (accepted.file) {
     for (const e of acceptedStale) lines.push(`- ${e.page} - ${e.name || e.key} - ${e.reason || ""}`);
     lines.push("");
   }
+  if (acceptedOutOfScope) {
+    lines.push(`${acceptedOutOfScope} more accepted entr${acceptedOutOfScope === 1 ? "y is" : "ies are"} for pages this report does not compare (not checked here).`);
+    lines.push("");
+  }
 }
 
 if (withdrawnElements.length) {
@@ -752,7 +756,7 @@ writeJson(path.join(reportDir, "report.json"), {
   statusMismatches: statusMismatches.length,
   previewBypassed: previewBypassed.length,
   accepted: accepted.file
-    ? { file: accepted.file, entries: accepted.byKey.size, matched: acceptedElements.length, stale: acceptedStale }
+    ? { file: accepted.file, entries: accepted.byKey.size, matched: acceptedElements.length, stale: acceptedStale, outOfScope: acceptedOutOfScope }
     : undefined,
   comparison,
   pages,

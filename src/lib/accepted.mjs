@@ -53,7 +53,21 @@ export function findAccepted(accepted, page, key, prodPrint, stagePrint) {
   return e;
 }
 
-/** Entries that matched nothing this run: the diff changed or is gone. */
-export function staleAccepted(accepted) {
-  return [...accepted.byKey.entries()].filter(([k]) => !accepted.used.has(k)).map(([, e]) => e);
+/**
+ * Entries that matched nothing this run, split by whether this report compared their page at all.
+ * `stale`: the page was compared and the diff changed or is gone. `outOfScope`: the page is not in
+ * this report (another suite's page, or one a failed-only run skipped) - nothing can be said about
+ * it here, so it is only counted. `pagePaths` = the paths this report compared; without it every
+ * unmatched entry is stale, as before.
+ */
+export function staleAccepted(accepted, pagePaths) {
+  const inScope = pagePaths ? new Set([...pagePaths].map((p) => String(p).toLowerCase())) : null;
+  const stale = [];
+  let outOfScope = 0;
+  for (const [k, e] of accepted.byKey.entries()) {
+    if (accepted.used.has(k)) continue;
+    if (inScope && !inScope.has(String(e.page).toLowerCase())) outOfScope++;
+    else stale.push(e);
+  }
+  return { stale, outOfScope };
 }
