@@ -238,6 +238,13 @@ const shotStitch = !(args["shot-stitch"] === "0" || args["shot-stitch"] === fals
 // the flow) is shot in its top-of-page layout - the only layout a scriptless copy of the legacy
 // site ever has. Off by default: it changes what a scroll-reactive page looks like in the shot.
 const freezeScroll = args["freeze-scroll-handlers"] === true || ["1", "true"].includes(String(args["freeze-scroll-handlers"] ?? "").toLowerCase());
+// Opt-in: a selector the page sets once its client-side scripts have done their part (a theme that
+// clones carousels and binds accordions after hydration). Waited for - softly, up to --ready-timeout
+// ms - before the lazy-load scroll and anything read off the page, so text and shots are of the
+// finished page and not of a race with its scripts. A page that never matches is captured anyway and
+// says so on its marker (`readyTimeout`). Unset = no wait, as before.
+const readySelector = typeof args["ready-selector"] === "string" && args["ready-selector"].trim() ? args["ready-selector"].trim() : null;
+const readyTimeout = Math.max(0, parseInt(args["ready-timeout"] ?? "20000", 10) || 0);
 let sharpMod = null;
 
 // Header-only bypass on purpose: adding x-vercel-set-bypass-cookie makes Vercel
@@ -807,6 +814,11 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
     // Wait (softly) until the scope selector exists, so SPA hydration is done.
     const scopeWait = "#wrapper, main";
     await page.waitForSelector(scopeWait, { timeout: 15000 }).catch(() => {});
+    if (readySelector && readyTimeout > 0) {
+      await page.waitForSelector(readySelector, { state: "attached", timeout: readyTimeout }).catch(() => {
+        rec.readyTimeout = readySelector;
+      });
+    }
 
     // One end-to-end scroll to trigger lazy loaders, then back to top. The end is re-read every
     // step, so content a lazy loader adds below the first height is scrolled through too; capped
