@@ -147,13 +147,16 @@ function readIndexHeader(file) {
   }
   const itemPath = /"ItemPath"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head);
   const id = /"ID"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head);
+  // Optional, and ahead of `ID` where the export writes it: the item the production page says it
+  // was rendered from (siphon's ProductionItemID, from data-sc-item-id). See buildUrlToIndexMap.
+  const served = /"ProductionItemID"\s*:\s*"([^"]*)"/.exec(head);
   if (itemPath && id) {
-    return { ItemPath: JSON.parse(`"${itemPath[1]}"`), ID: JSON.parse(`"${id[1]}"`) };
+    return { ItemPath: JSON.parse(`"${itemPath[1]}"`), ID: JSON.parse(`"${id[1]}"`), ProductionItemID: served ? served[1] : null };
   }
   // Unrecognised shape (reordered keys, or a prefix longer than HEAD_BYTES): pay for the
   // full parse rather than dropping the page.
   const json = readJsonSafe(file);
-  return json ? { ItemPath: json.ItemPath, ID: json.ID } : null;
+  return json ? { ItemPath: json.ItemPath, ID: json.ID, ProductionItemID: json.ProductionItemID ?? null } : null;
 }
 
 /**
@@ -201,6 +204,12 @@ function readExportedItem(itemsRoot, rawId) {
  *
  * @returns {{ map: Map<string,string>, rootItemPath: string, files: string[], stats: object }}
  */
+/** Whether an index.json header is the presentation of the item its production page was rendered from. */
+function isServedItem(header) {
+  const norm = (v) => String(v ?? "").replace(/[{}]/g, "").toLowerCase();
+  return Boolean(header?.ProductionItemID) && norm(header.ProductionItemID) === norm(header.ID);
+}
+
 export function buildUrlToIndexMap(rootDir, rootItemPathOverride, itemsRoot) {
   const files = findIndexJsonFiles(rootDir);
   // One header read per file, shared by the root resolution below and the map build, so a
@@ -213,6 +222,7 @@ export function buildUrlToIndexMap(rootDir, rootItemPathOverride, itemsRoot) {
     );
   }
   const map = new Map();
+  const servedUrls = new Set();
   const stats = { fromSlug: 0, fromItemPath: 0, unresolved: 0, duplicates: 0 };
   for (const file of files) {
     const json = headers.get(file);
@@ -230,9 +240,23 @@ export function buildUrlToIndexMap(rootDir, rootItemPathOverride, itemsRoot) {
       }
       stats.fromItemPath++;
     }
-    // First writer wins, so a Slug-derived entry is never displaced by a fallback one.
-    if (map.has(url)) stats.duplicates++;
-    else map.set(url, file);
+    // First writer wins, so a Slug-derived entry is never displaced by a fallback one - with one
+    // exception. Two Sitecore items can resolve to one URL (two "twins" whose slugs agree), each
+    // with a presentation of its own; the production page names the item it was rendered from
+    // (ProductionItemID), so the presentation OF that item describes the page and replaces one
+    // that does not, whatever the file order. Without the field the order still decides.
+    const served = isServedItem(json);
+    if (map.has(url)) {
+      stats.duplicates++;
+      if (served && !servedUrls.has(url)) {
+        map.set(url, file);
+        servedUrls.add(url);
+        stats.servedOverDuplicate = (stats.servedOverDuplicate || 0) + 1;
+      }
+    } else {
+      map.set(url, file);
+      if (served) servedUrls.add(url);
+    }
   }
   return { map, rootItemPath, files, stats };
 }
