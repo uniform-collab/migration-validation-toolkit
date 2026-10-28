@@ -808,11 +808,13 @@ async function capturePage(context, pagePath, statusOnly, signals = {}) {
     const scopeWait = "#wrapper, main";
     await page.waitForSelector(scopeWait, { timeout: 15000 }).catch(() => {});
 
-    // One end-to-end scroll to trigger lazy loaders, then back to top.
+    // One end-to-end scroll to trigger lazy loaders, then back to top. The end is re-read every
+    // step, so content a lazy loader adds below the first height is scrolled through too; capped
+    // so an infinite-scroll page cannot hold the capture.
     await page.evaluate(async (stepDelay) => {
-      const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+      const total = () => Math.min(100000, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
       let y = 0;
-      while (y < total) {
+      while (y < total()) {
         window.scrollTo(0, y);
         await new Promise((r) => setTimeout(r, stepDelay));
         y += window.innerHeight * 0.9;

@@ -811,7 +811,9 @@ It is **outside every number**. `compare-screenshots` only walks the per-compone
 page dir, and this file sits in the page dir itself, so it adds nothing to a page's visual score,
 the component counts or the regression diff; no diff image is made of it. Its size is recorded on
 the page marker (`fullPage: { file, width, height, pageHeight, truncated }`), which is how it
-reaches `manifest.json` and how a viewer finds it.
+reaches `manifest.json` and how a viewer finds it. `pageHeight` is the document height read
+**after** the shot, so it is the page with its lazy content loaded (the lazy-load scroll before it
+follows the page as it grows, up to 100000 px); `height` is the shot's own, clipped.
 
 It is a JPEG (quality 70) clipped at 16000 px: full pages at 1280 wide run to 8-12k px, a PNG of that
 is tens of MB, and a single oversized capture can fail on Chromium's texture limit. `truncated: true`

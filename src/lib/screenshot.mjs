@@ -151,7 +151,12 @@ export async function captureFullPage(page, file, { maxHeight = 16000, quality =
       animations: "disabled",
       timeout: 60000,
     });
-    return { width: dims.width, height, pageHeight: dims.height, truncated: dims.height > height };
+    // pageHeight is read again AFTER the shot: taking it scrolls the page through and can still
+    // load lazy content, and the height a reader wants is the one of the page fully loaded.
+    const pageHeight = await page
+      .evaluate(() => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0))
+      .catch(() => dims.height);
+    return { width: dims.width, height, pageHeight, truncated: pageHeight > height };
   } catch (err) {
     console.warn(`  full-page shot failed: ${String(err?.message || err).split("\n")[0]}`);
     return null;
