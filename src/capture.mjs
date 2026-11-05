@@ -173,6 +173,11 @@ const onlyFailed = Boolean(args["only-failed"]);
 // LOCAL stage: the dedicated e2e server is fast and deterministic, so retrying a
 // genuinely-broken page just wastes time — especially in failed-only mode).
 const noRetry = Boolean(args["no-retry"]);
+// --recheck-404 <seconds>: a page whose final answer is 404 is captured ONCE more, after every other
+// page (the main pass and the end pass) and a pause of that many seconds; the second answer counts. Off
+// by default. For a deployed frontend whose cold first render answers 404 and the next request 200 (a
+// WSP canary run lost 632 pages that way; a retry within the pass met another cold server instance).
+const recheck404Ms = Math.max(0, parseFloat(args["recheck-404"] || "0") || 0) * 1000;
 const bypassSecret = typeof args["bypass-secret"] === "string" ? args["bypass-secret"].trim() : "";
 // Members-only routes: the frontend (cha-website middleware) grants access to any request
 // carrying `?secret=<UNIFORM_PREVIEW_SECRET>&is_visual_testing=true` — the same escape hatch
@@ -1162,6 +1167,8 @@ let bypassed = 0;
 const queue = shardFeed ? [] : [...items];
 /** Pages that threw under --no-retry, for the end pass (see the catch in runWorkerOn). */
 const deferredItems = [];
+/** Pages whose final answer was 404, for the --recheck-404 pass after everything else. */
+const recheck404Items = [];
 const END_PASS_CONCURRENCY = 4;
 // Fed from the parent (--shard-feed): one request at a time, for as many pages as workers wait.
 let feedDone = !shardFeed;
@@ -1369,6 +1376,15 @@ async function runWorkerOn(browser, release) {
       continue;
     }
 
+    // --recheck-404: no marker yet; the page is captured again after every other one (see the pass below).
+    if (recheck404Ms > 0 && !statusOnly && rec && rec.status === 404 && !item.recheck404) {
+      item.recheck404 = true;
+      recheck404Items.push(item);
+      if (tuner) tuner.record([...degraded], false);
+      console.warn(`  ${pagePath}: status 404 - re-checked at the end, after a ${recheck404Ms / 1000}s pause`);
+      continue;
+    }
+
     // Write the page marker into each active output dir.
     if (doContent) writeJson(markerPath(outDir, pagePath), rec);
     if (doShots) writeJson(markerPath(shotsOut, pagePath), rec);
@@ -1419,6 +1435,15 @@ if (deferredItems.length && !shardParent) {
   const atOnce = Math.min(END_PASS_CONCURRENCY, deferredItems.length);
   console.log(`Retrying ${deferredItems.length} page(s) that failed under load, ${atOnce} at a time...`);
   queue.push(...deferredItems.splice(0));
+  await Promise.all(Array.from({ length: atOnce }, () => worker()));
+}
+// The --recheck-404 pass: every page whose answer was 404, once more, after all others and a pause.
+// Whatever it answers now is recorded (a page is re-checked only once).
+if (recheck404Items.length && !shardParent) {
+  const atOnce = Math.min(END_PASS_CONCURRENCY, recheck404Items.length);
+  console.log(`Re-checking ${recheck404Items.length} page(s) that answered 404, after a ${recheck404Ms / 1000}s pause, ${atOnce} at a time...`);
+  await sleep(recheck404Ms);
+  queue.push(...recheck404Items.splice(0));
   await Promise.all(Array.from({ length: atOnce }, () => worker()));
 }
 if (tuner && !shardParent) console.log(tuner.summary());
