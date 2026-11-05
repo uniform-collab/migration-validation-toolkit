@@ -95,6 +95,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--only-failed` / `--prev-report <path>` | Re-capture only the pages that scored < 100 in the previous report. |
 | `--timeout <ms>` / `--no-retry` | Navigation budget and retry behaviour. |
 | `--recheck-404 <seconds>` | Capture every page whose final answer was 404 once more, after all other pages and a pause of that many seconds; the second answer counts. Off by default. For a deployed frontend whose cold first render answers 404. |
+| `--recheck-statuses <list>` | Which final answers `--recheck-404` re-checks: status codes and classes, comma-separated, e.g. `404,5xx`. Default `404`. For a frontend that answers 5xx when its API fails under load. |
 | `--min-height` / `--max-height` / `--remove-before` | Element thresholds and pre-capture removals. |
 | `--bypass-secret <s>` | `x-vercel-protection-bypass` header for a protected deployment. |
 | `--preview-secret <s>` / `--preview-authenticated` | Render access-gated pages via the frontend's preview escape hatch. |

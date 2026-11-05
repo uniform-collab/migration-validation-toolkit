@@ -178,6 +178,12 @@ const noRetry = Boolean(args["no-retry"]);
 // by default. For a deployed frontend whose cold first render answers 404 and the next request 200 (a
 // WSP canary run lost 632 pages that way; a retry within the pass met another cold server instance).
 const recheck404Ms = Math.max(0, parseFloat(args["recheck-404"] || "0") || 0) * 1000;
+// --recheck-statuses <list>: which final answers that re-check covers - status codes and classes, e.g.
+// "404,5xx" (default "404"). A frontend that answers 500 instead of a false 404 when its API fails under
+// load leaves its failures as 5xx (305 pages of one WSP canary run).
+const recheckStatuses = String(args["recheck-statuses"] || "404").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+const isRecheckStatus = (status) =>
+  recheckStatuses.some((t) => (/^\dxx$/.test(t) ? Math.floor(status / 100) === Number(t[0]) : Number(t) === status));
 const bypassSecret = typeof args["bypass-secret"] === "string" ? args["bypass-secret"].trim() : "";
 // Members-only routes: the frontend (cha-website middleware) grants access to any request
 // carrying `?secret=<UNIFORM_PREVIEW_SECRET>&is_visual_testing=true` — the same escape hatch
@@ -1376,12 +1382,13 @@ async function runWorkerOn(browser, release) {
       continue;
     }
 
-    // --recheck-404: no marker yet; the page is captured again after every other one (see the pass below).
-    if (recheck404Ms > 0 && !statusOnly && rec && rec.status === 404 && !item.recheck404) {
+    // --recheck-404 (+ --recheck-statuses): no marker yet; the page is captured again after every other one
+    // (see the pass below).
+    if (recheck404Ms > 0 && !statusOnly && rec && isRecheckStatus(rec.status) && !item.recheck404) {
       item.recheck404 = true;
       recheck404Items.push(item);
       if (tuner) tuner.record([...degraded], false);
-      console.warn(`  ${pagePath}: status 404 - re-checked at the end, after a ${recheck404Ms / 1000}s pause`);
+      console.warn(`  ${pagePath}: status ${rec.status} - re-checked at the end, after a ${recheck404Ms / 1000}s pause`);
       continue;
     }
 
@@ -1441,7 +1448,7 @@ if (deferredItems.length && !shardParent) {
 // Whatever it answers now is recorded (a page is re-checked only once).
 if (recheck404Items.length && !shardParent) {
   const atOnce = Math.min(END_PASS_CONCURRENCY, recheck404Items.length);
-  console.log(`Re-checking ${recheck404Items.length} page(s) that answered 404, after a ${recheck404Ms / 1000}s pause, ${atOnce} at a time...`);
+  console.log(`Re-checking ${recheck404Items.length} page(s) that answered ${recheckStatuses.join("/")}, after a ${recheck404Ms / 1000}s pause, ${atOnce} at a time...`);
   await sleep(recheck404Ms);
   queue.push(...recheck404Items.splice(0));
   await Promise.all(Array.from({ length: atOnce }, () => worker()));
