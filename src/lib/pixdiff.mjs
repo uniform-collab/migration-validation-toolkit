@@ -27,6 +27,17 @@ const OVERHANG_RGB = [255, 140, 0];
  * noise really is sub-pixel and the constant is not on a slope.
  */
 const SIZE_TOLERANCE_PX = 2;
+/**
+ * The size cap. Blank overhang is not counted (scoreOverhang), so a component that is a big white
+ * box on one side and a thin strip on the other matched its few non-blank pixels and scored ~100:
+ * a Share Pop Up at 1264x127 vs 917x20 scored 99.8. So, beyond SIZE_TOLERANCE_PX, the score is
+ * capped by OVERLAP = intersection area / union area: score <= min(100, 100 * overlap /
+ * FULL_SCORE_OVERLAP). At 50% overlap or more nothing changes; 20% caps at 40, that pop-up (11%)
+ * at 23. No cliff: the cap falls linearly. Measured before it was written, on WSP's local-full
+ * report (64,579 components): it lowers 233 of them on 132 pages, mean page -0.09 points; the
+ * stricter "score <= 100 * overlap" lowered 5,098 (uniform-collab/wsp#149).
+ */
+const FULL_SCORE_OVERLAP = 0.5;
 
 export function isBlank(buf, o) {
   if (buf[o + 3] <= BLANK_ALPHA_MAX) return true;
@@ -134,7 +145,12 @@ export async function compareImages(prodPath, migPath, diffPath) {
     mismatched += scoreOverhang(m, iw, ih, null, W, null);
   }
 
-  const mismatch = W && H ? (mismatched / (W * H)) * 100 : 0;
+  let mismatch = W && H ? (mismatched / (W * H)) * 100 : 0;
+  if (sizeIsContent && W && H) {
+    const overlap = (Math.min(p.width, m.width) * Math.min(p.height, m.height)) / (W * H);
+    const maxScore = Math.min(100, (100 * overlap) / FULL_SCORE_OVERLAP);
+    mismatch = Math.max(mismatch, 100 - maxScore);
+  }
   let diffWritten = false;
   // diffPath null = score only, no diff image (the excluded pairs behind rawOverallScore).
   if (mismatch > 0 && diffPath) {

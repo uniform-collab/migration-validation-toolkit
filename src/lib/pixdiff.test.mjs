@@ -106,6 +106,23 @@ test("a mismatch inside the shared region is still counted, over the UNION area"
   assert.ok(Math.abs(r.mismatch - 1) < 0.01, `${r.mismatch}`);
 });
 
+test("very different sizes with matching non-blank pixels are capped by overlap", async () => {
+  // The Share Pop Up shape: a big white box on one side, a thin strip on the other, the same few
+  // dark pixels on both. Blank overhang is not counted, so without the cap this scored ~100.
+  const big = await png("s-a", 1264, 127, [[10, 5, 60, 15]]);
+  const strip = await png("s-b", 917, 20, [[10, 5, 60, 15]]);
+  const r = await compareImages(big, strip, diffFile("s"));
+  const overlap = (917 * 20) / (1264 * 127);
+  assert.ok(Math.abs(100 - r.mismatch - 200 * overlap) < 0.01, `score ${100 - r.mismatch}`);
+  assert.ok(100 - r.mismatch < 40);
+});
+
+test("half overlap or more is not capped", async () => {
+  const a = await png("o-a", 200, 100, [[10, 10, 60, 40]]);
+  const b = await png("o-b", 200, 200, [[10, 10, 60, 40]]); // 50% overlap, white overhang
+  assert.equal((await compareImages(a, b, diffFile("o"))).mismatch, 0);
+});
+
 test("disjoint sizes with no shared pixels still score their content", async () => {
   const a = await png("d-a", 10, 10, [[0, 0, 10, 10]]);
   const b = await png("d-b", 10, 10, []);

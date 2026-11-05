@@ -729,7 +729,12 @@ disputed trailing edge, and a size disagreement is classified before it is score
 | size delta | treated as | scored |
 |---|---|---|
 | ≤ 2px (`SIZE_TOLERANCE_PX`) | layout rounding | overhang ignored; the trailing 2px strip of the shared region is not compared either |
-| > 2px | content | the **non-blank** overhang is counted |
+| > 2px | content | the **non-blank** overhang is counted, and the score is capped at `min(100, 200 × overlap)` |
+
+`overlap` = intersection area / union area (`FULL_SCORE_OVERLAP` = 0.5 in `lib/pixdiff.mjs`). Why: blank
+overhang is not counted, so a big white box against a thin strip matched its few non-blank pixels and
+scored ~100 (a 1264×127 vs 917×20 pop-up scored 99.8; capped, 23). At 50 % overlap or more nothing
+changes; below, the cap falls linearly (20 % → 40).
 
 The old rule padded the shorter image to the union canvas with **opaque white** and diffed the whole
 thing. That is wrong in both directions, and the second error is the serious one:

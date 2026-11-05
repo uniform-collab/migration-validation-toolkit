@@ -26,7 +26,9 @@
  * Pixel diff uses pixelmatch + sharp (both prebuilt, no native canvas build) and
  * lives in lib/pixdiff.mjs, which is unit-tested. Short version: a size
  * disagreement within 2px is layout rounding and is not compared; beyond that it
- * is content and its non-blank part is counted. The old pad-the-shorter-image-
+ * is content and its non-blank part is counted, and the score is capped at
+ * min(100, 200 x overlap) (overlap = intersection / union area), so a white box
+ * against a thin strip cannot score ~100. The old pad-the-shorter-image-
  * with-white rule both invented findings at the disputed edge AND hid real
  * content loss that happened to sit on white.
  *
