@@ -216,9 +216,10 @@ export function collectComponentTexts(cfg) {
   // Clone the element, remove descendant component subtrees (top-most marked
   // descendants — removing an ancestor drops its nested components too), then
   // read innerText from an off-screen clone.
-  function extractMaskedInnerText(el) {
+  // `mask = false` keeps the nested components: a carousel slide is read whole.
+  function extractMaskedInnerText(el, mask = true) {
     const clone = el.cloneNode(true);
-    const marks = Array.from(clone.getElementsByClassName(MARK));
+    const marks = mask ? Array.from(clone.getElementsByClassName(MARK)) : [];
     const topMost = marks.filter(
       (m) => !marks.some((p) => p !== m && p.contains(m))
     );
@@ -244,6 +245,23 @@ export function collectComponentTexts(cfg) {
     }
   }
 
+  // The real slides of the first carousel under `host`: Owl Carousel 2 (`.owl-stage > .owl-item`,
+  // without the `.cloned` copies a looping carousel adds) or Bootstrap 3/4/5
+  // (`.carousel-inner > .item | .carousel-item`). Null when there is none.
+  function carouselSlidesIn(host) {
+    const stage = host.querySelector(".owl-stage");
+    if (stage) {
+      const all = Array.from(stage.children).filter((e) => e.classList.contains("owl-item"));
+      if (all.length) return { kind: "owl", all, slides: all.filter((e) => !e.classList.contains("cloned")) };
+    }
+    const inner = host.querySelector(".carousel-inner");
+    if (inner) {
+      const all = Array.from(inner.children).filter((e) => e.classList.contains("item") || e.classList.contains("carousel-item"));
+      if (all.length) return { kind: "bootstrap", all, slides: all };
+    }
+    return null;
+  }
+
   const items = [];
   const empty = [];
   const excluded = [];
@@ -264,6 +282,24 @@ export function collectComponentTexts(cfg) {
       continue;
     }
     items.push({ order: t.order, key: t.key, name: t.name, text });
+    if (t.slides) {
+      // One text per real slide (--carousel-slides). The same finder as the screenshot pass
+      // (screenshot.mjs, carouselSlidesIn); inlined because this function is serialized.
+      const found = carouselSlidesIn(el);
+      (found?.slides || []).forEach((slide, i) => {
+        const slideText = extractMaskedInnerText(slide, false);
+        if (!slideText.replace(/\s+/g, " ").trim()) return;
+        const n = i + 1;
+        items.push({
+          order: t.order,
+          key: `${t.key}~slide-${String(n).padStart(2, "0")}`,
+          name: `${t.name} slide ${n}`,
+          parent: t.key,
+          slide: n,
+          text: slideText,
+        });
+      });
+    }
   }
 
   return { items, unresolved, empty, excluded };

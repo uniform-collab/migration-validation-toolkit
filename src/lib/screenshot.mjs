@@ -615,6 +615,157 @@ async function cropImageHeightIfNeeded(imgPath, maxHeight) {
  *
  * @returns {Promise<{captured: {order,key,name,imagesTimedOut?}[], skippedEmpty: object[], imageTimeouts: string[]}>}
  */
+/**
+ * --carousel-slides: shoot every real slide of the carousel under host `order`, one at a time,
+ * as `<key>~slide-NN` (index-json.mjs slideKey) - after the host's own, as-rendered shot.
+ *
+ * A slide is shot whole: the child components masked out of the host's shot are put back first
+ * (fixed and sticky elements stay hidden). Showing one slide:
+ *   - Bootstrap 3/4/5: `active` on that slide only (freezeAnimations has turned transitions off).
+ *   - Owl Carousel 2: every other `.owl-item`, the loop's `.cloned` copies included, is
+ *     `display:none`. With freezeAnimations' `transform: none` on the stage, the slide then sits at
+ *     the stage's left edge, inside `.owl-stage-outer`'s visible window - an element shot of a slide
+ *     scrolled out of that window would only show what is there instead.
+ * The slide is tagged `data-sel-comp-id="<order>~s<n>"`, so the stability gate and the stitcher
+ * work on it unchanged. Everything is put back afterwards; the slide finder is the one in
+ * extract-selectors.mjs (carouselSlidesIn), inlined because evaluate() functions are serialized.
+ */
+async function captureCarouselSlides(page, order, key, name, pageDir, opts, out) {
+  const { suffix, maxHeight, sharp, minHeight, stablePollMs = 50, stableMaxMs = 2000, stitch = true } = opts;
+  const count = await page
+    .evaluate((o) => {
+      if (Array.isArray(window.__selMask)) {
+        for (const { ph, node } of window.__selMask) if (ph && ph.parentNode) ph.replaceWith(node);
+      }
+      window.__selMask = [];
+      const host = document.querySelector(`[data-sel-comp-id="${o}"]`);
+      if (!host) return 0;
+      let found = null;
+      const stage = host.querySelector(".owl-stage");
+      if (stage) {
+        const all = Array.from(stage.children).filter((e) => e.classList.contains("owl-item"));
+        if (all.length) found = { kind: "owl", all, slides: all.filter((e) => !e.classList.contains("cloned")) };
+      }
+      if (!found) {
+        const inner = host.querySelector(".carousel-inner");
+        if (inner) {
+          const all = Array.from(inner.children).filter((e) => e.classList.contains("item") || e.classList.contains("carousel-item"));
+          if (all.length) found = { kind: "bootstrap", all, slides: all };
+        }
+      }
+      if (!found || !found.slides.length) return 0;
+      found.saved = found.all.map((e) => ({ el: e, cls: e.className, display: e.style.getPropertyValue("display"), prio: e.style.getPropertyPriority("display") }));
+      found.slides.forEach((e, i) => e.setAttribute("data-sel-comp-id", `${o}~s${i + 1}`));
+      window.__selSlides = found;
+      return found.slides.length;
+    }, order)
+    .catch(() => 0);
+  if (!count) return;
+
+  try {
+    for (let n = 1; n <= count; n++) {
+      const id = `${order}~s${n}`;
+      const skey = `${key}~slide-${String(n).padStart(2, "0")}`;
+      const sname = `${name} slide ${n}`;
+      const meta = { parent: key, slide: n };
+      const shown = await page
+        .evaluate((i) => {
+          const f = window.__selSlides;
+          if (!f) return false;
+          const slide = f.slides[i];
+          if (f.kind === "bootstrap") {
+            const moving = ["active", "next", "prev", "left", "right",
+              "carousel-item-next", "carousel-item-prev", "carousel-item-start", "carousel-item-end"];
+            for (const e of f.all) e.classList.remove(...moving);
+            slide.classList.add("active");
+          } else {
+            for (const e of f.all) {
+              if (e === slide) e.style.removeProperty("display");
+              else e.style.setProperty("display", "none", "important");
+            }
+          }
+          slide.scrollIntoView({ behavior: "auto", block: "center" });
+          const b = slide.getBoundingClientRect();
+          return { width: Math.round(b.width), height: Math.round(b.height) };
+        }, n - 1)
+        .catch(() => false);
+      if (!shown) continue;
+      if (shown.width === 0 || shown.height < minHeight) {
+        out.skippedEmpty.push({ order, key: skey, name: sname, ...meta, width: shown.width, height: shown.height, reason: shown.width === 0 ? "zero-size" : "below-min-height" });
+        continue;
+      }
+      const element = await page.$(`[data-sel-comp-id="${id}"]`);
+      if (!element) continue;
+
+      // The images of a slide that was hidden until now have not been fetched yet.
+      const imagesTimedOut = await Promise.race([
+        element
+          .evaluate(async (el) => {
+            const images = Array.from(el.querySelectorAll("img"));
+            for (const img of images) if (img.getAttribute("loading") === "lazy") img.loading = "eager";
+            await Promise.all(images.map(async (img) => {
+              if (!img.complete) {
+                await new Promise((resolve) => {
+                  img.addEventListener("load", resolve, { once: true });
+                  img.addEventListener("error", resolve, { once: true });
+                });
+              }
+              if (img.naturalWidth > 0 && typeof img.decode === "function") {
+                try { await img.decode(); } catch {}
+              }
+            }));
+            return false;
+          })
+          .catch(() => false),
+        page.waitForTimeout(5000).then(() => true, () => true),
+      ]);
+      if (imagesTimedOut) {
+        console.warn(`  images under ${skey} still loading after 5s - shot marked degraded`);
+        out.imageTimeouts.push(skey);
+      }
+
+      const compDir = path.join(pageDir, skey);
+      fs.mkdirSync(compDir, { recursive: true });
+      const filePath = path.join(compDir, `${skey}${suffix}.png`);
+      let unstable = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const before = await settleAtShotPosition(page, id, stablePollMs, stableMaxMs);
+        let stitched = null;
+        if (stitch && sharp) stitched = await captureStitched(page, id, sharp, { maxHeight }).catch(() => null);
+        if (stitched) fs.writeFileSync(filePath, stitched);
+        else await element.screenshot({ path: filePath });
+        const after = await hostDocRect(page, id);
+        if (!stablePollMs || stablePollMs <= 0 || sameRect(before.rect, after)) { unstable = null; break; }
+        unstable = { before: before.rect, after };
+        fs.rmSync(filePath, { force: true });
+      }
+      if (unstable) {
+        console.warn(`  unstable layout, not shooting ${skey}`);
+        out.skippedEmpty.push({ order, key: skey, name: sname, ...meta, width: shown.width, height: shown.height, reason: "unstable-layout" });
+        continue;
+      }
+      if (sharp) await cropImageHeightIfNeeded(filePath, maxHeight);
+      out.captured.push({ order, key: skey, name: sname, ...meta, ...(imagesTimedOut ? { imagesTimedOut: true } : {}) });
+    }
+  } catch (err) {
+    console.warn(`  failed to screenshot the slides of ${key}: ${String(err.message || err).slice(0, 200)}`);
+  } finally {
+    await page
+      .evaluate(() => {
+        const f = window.__selSlides;
+        if (!f) return;
+        for (const s of f.saved) {
+          s.el.className = s.cls;
+          if (s.display) s.el.style.setProperty("display", s.display, s.prio);
+          else s.el.style.removeProperty("display");
+          s.el.removeAttribute("data-sel-comp-id");
+        }
+        delete window.__selSlides;
+      })
+      .catch(() => {});
+  }
+}
+
 export async function captureResolvedTargets(page, targets, resolution, pageDir, opts) {
   const {
     suffix,
@@ -807,6 +958,10 @@ export async function captureResolvedTargets(page, targets, resolution, pageDir,
 
       if (sharp) await cropImageHeightIfNeeded(filePath, maxHeight);
       captured.push(imagesTimedOut ? { order, key, name: target.name, imagesTimedOut: true } : { order, key, name: target.name });
+      // --carousel-slides: each real slide beside the as-rendered shot above.
+      if (target.slides) {
+        await captureCarouselSlides(page, order, key, target.name, pageDir, opts, { captured, skippedEmpty, imageTimeouts });
+      }
     } catch (err) {
       console.warn(`  failed to screenshot ${key}: ${String(err.message || err).slice(0, 200)}`);
     } finally {

@@ -423,6 +423,28 @@ export function markExcludedComponents(targets, excluded) {
   return targets;
 }
 
+/**
+ * Flag the targets whose carousel slides are captured one by one (`--carousel-slides`): a comma
+ * list of rendering names, or `*` for every rendering that turns out to hold a carousel. The
+ * component itself is still captured as it renders; each real slide is added beside it as
+ * `<key>~slide-NN` (see slideKey), so the layout (arrows, dots) and every slide's content are both
+ * compared. Excluded targets never get slides.
+ */
+export function markCarouselSlideComponents(targets, names) {
+  if (!names || names.size === 0) return targets;
+  const all = names.has("*");
+  for (const t of targets) {
+    if (t.excluded) continue;
+    if (all || names.has(String(t.name || "").toLowerCase())) t.slides = true;
+  }
+  return targets;
+}
+
+/** The dataset key of slide `n` (1-based) of the component keyed `key`. */
+export function slideKey(key, n) {
+  return `${key}~slide-${String(n).padStart(2, "0")}`;
+}
+
 /** Keep only main-content targets (drop header/footer/GTM/ad top-level placeholders). */
 export function filterBodyOnly(targets) {
   return targets.filter((t) => {

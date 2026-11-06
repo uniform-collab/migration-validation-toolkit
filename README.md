@@ -85,6 +85,7 @@ migration-validate capture --base-url https://stage.example.com \
 | `--rebase <json>` | `[{from,to}]` selector-prefix rewrites (legacy positional selectors). |
 | `--body-only false` | Include header/footer/analytics instead of main content only. |
 | `--exclude-components <names>` | Rendering names resolved and masked, but never compared. |
+| `--carousel-slides <names>\|*` | These renderings also get one text and one shot per carousel slide, `<key>~slide-NN`. Off by default. See *Carousel slides*. |
 | `--include /a,/b` | Allowlist of paths the migrated frontend covers so far (exact or `*` glob). Empty = the whole page list. See *Scoping a partially-built frontend*. |
 | `--concurrency <n>\|auto` | Parallel browser contexts. `auto` sizes the pool while the run is in flight — see *Auto concurrency*. |
 | `--concurrency-max <n>` / `--autotune-interval <s>` | Upper bound for `auto` (default: the host's CPUs, or its **free** memory at ~600 MB a worker, whichever is lower) and the shortest measurement window (default 15). |
@@ -318,6 +319,29 @@ never scored. Two classes it got wrong on a real dataset: **item buckets**
 names (Sitecore slugifies per character, `"A  B"` → `a--b`, where a `/\s+/` slugifier collapses the
 run to one dash). Together that was 108 live pages never compared. The capture logs the split
 (`URLs from item Slug: …, from ItemPath fallback: …`), so a regression shows up in the log.
+
+### Carousel slides
+
+A carousel is captured as it renders: `freezeAnimations` stops autoplay and puts it on its first
+state, so only the slides on screen are compared and a wrong image or caption on slide 2+ never
+scores. `--carousel-slides <names>` (rendering names, or `*` for every rendering that holds one) keeps
+that as-rendered element and adds every real slide beside it as its own component,
+`<key>~slide-01`, `~slide-02`, … — one text and one screenshot each, on both sides. `.components.json`
+marks them with `parent` and `slide`; `compare` and `compare-screenshots` pair them by key like any
+other component, so a missing slide reads as missing and a wrong one as a diff on that slide alone.
+
+Recognised carousels (the first one under the rendering's element):
+
+| library | slides | how one slide is shown |
+|---|---|---|
+| Owl Carousel 2 | `.owl-stage > .owl-item`, without the loop's `.cloned` copies | every other item `display:none`; with transforms frozen, the slide sits at the stage's left edge, inside the visible window |
+| Bootstrap 3/4/5 | `.carousel-inner > .item` / `.carousel-item` | `active` on that slide only |
+
+A slide is captured whole: components nested in it are not masked out (they still get their own
+entry). Everything is restored after the slides, before the next component. Without the flag a
+capture is unchanged. Like `--exclude-components` it is part of the component model: both sides
+must be captured with the same value, so turning it on against a frozen expected dataset needs a
+re-capture of the expected pages that hold those carousels.
 
 ### Excluding a component
 

@@ -4,7 +4,35 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { extractCaptureTargets, extractUnselected, componentKey, buildUrlToIndexMap } from "./index-json.mjs";
+import { extractCaptureTargets, extractUnselected, componentKey, buildUrlToIndexMap, parseExcludedComponents, markExcludedComponents, markCarouselSlideComponents, slideKey } from "./index-json.mjs";
+
+test("--carousel-slides marks the named renderings, case-insensitively, never an excluded one", () => {
+  const targets = [
+    { order: 0, name: "Images Carousel" },
+    { order: 1, name: "Rich Text" },
+    { order: 2, name: "projects gallery carousel" },
+    { order: 3, name: "Images Carousel" },
+  ];
+  markExcludedComponents(targets, new Set([]));
+  targets[3].excluded = true;
+  markCarouselSlideComponents(targets, parseExcludedComponents("Images Carousel, Projects Gallery Carousel"));
+  assert.deepEqual(targets.map((t) => Boolean(t.slides)), [true, false, true, false]);
+});
+
+test("--carousel-slides * marks every rendering; empty marks none", () => {
+  const all = [{ order: 0, name: "A" }, { order: 1, name: "B" }];
+  markCarouselSlideComponents(all, parseExcludedComponents("*"));
+  assert.ok(all.every((t) => t.slides));
+  const none = [{ order: 0, name: "A" }];
+  markCarouselSlideComponents(none, parseExcludedComponents(""));
+  assert.equal(none[0].slides, undefined);
+});
+
+test("slideKey pads the slide number and stays a legal folder name", () => {
+  assert.equal(slideKey("images-carousel__1a2b3c4d", 3), "images-carousel__1a2b3c4d~slide-03");
+  assert.equal(slideKey("k", 12), "k~slide-12");
+  assert.doesNotMatch(slideKey("k", 1), /[<>:"/\\|?*]/);
+});
 
 const r = (Name, ID, extra = {}, children = []) => ({
   Name,

@@ -12,6 +12,7 @@
  *   --capture-mode content      innerText only (images blocked; fast) [default]
  *   --capture-mode screenshots  element screenshots only (V2)
  *   --capture-mode full         both, from the same loaded page (V2)
+ *   --carousel-slides <names|*> also one text + shot per carousel slide (<key>~slide-NN); off by default
  *
  * Content output under --out (V1: <slug>/NN.txt; V2: <slug>/<componentKey>.txt
  * + <slug>/.components.json), plus --out/manifest.json.
@@ -36,6 +37,7 @@ import {
   assignComponentKeys,
   parseExcludedComponents,
   markExcludedComponents,
+  markCarouselSlideComponents,
   normalizeUrlForLookup,
 } from "./lib/index-json.mjs";
 import {
@@ -89,6 +91,9 @@ let bodyOnly = true;
 // Renderings deliberately out of scope (TEST_EXCLUDE_COMPONENTS): resolved and masked out of
 // their ancestors, but never compared in their own right.
 let excludedComponents = new Set();
+// --carousel-slides <names | *>: these renderings ALSO get one text and one shot per real carousel
+// slide, keyed <key>~slide-NN (lib/index-json.mjs markCarouselSlideComponents). Off by default.
+const carouselSlideComponents = parseExcludedComponents(args["carousel-slides"]);
 {
   const presentationRoot = requireArg(args, "presentation-root");
   const itemRoot =
@@ -956,6 +961,7 @@ async function captureV2(page, pagePath, rec, quiescer) {
   let targets = loadCaptureTargets(indexPath);
   if (bodyOnly) targets = filterBodyOnly(targets);
   markExcludedComponents(targets, excludedComponents);
+  markCarouselSlideComponents(targets, carouselSlideComponents);
   rec.targets = targets.length;
   const keys = assignComponentKeys(targets);
 
@@ -974,6 +980,7 @@ async function captureV2(page, pagePath, rec, quiescer) {
       matchCount: t.matchCount || 0,
       scopeMatchCount: t.scopeMatchCount || 0,
       excluded: t.excluded || false,
+      slides: t.slides || false,
     }));
     const res = await page.evaluate(collectComponentTexts, { targets: payload });
     const pageDir = path.join(outDir, pathToSlugDir(pagePath));
@@ -981,7 +988,7 @@ async function captureV2(page, pagePath, rec, quiescer) {
     const components = [];
     for (const it of res.items) {
       fs.writeFileSync(path.join(pageDir, `${it.key}.txt`), it.text, "utf8");
-      components.push({ order: it.order, key: it.key, name: it.name });
+      components.push(it.slide ? { order: it.order, key: it.key, name: it.name, parent: it.parent, slide: it.slide } : { order: it.order, key: it.key, name: it.name });
     }
     // The renderings this index.json places nowhere: compare tells "the stage lost it" from "the
     // selector was withdrawn after the other side was frozen" by them (see extractUnselected).
