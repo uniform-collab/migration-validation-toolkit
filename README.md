@@ -329,6 +329,7 @@ that as-rendered element and adds every real slide beside it as its own componen
 `<key>~slide-01`, `~slide-02`, … — one text and one screenshot each, on both sides. `.components.json`
 marks them with `parent` and `slide`; `compare` and `compare-screenshots` pair them by key like any
 other component, so a missing slide reads as missing and a wrong one as a diff on that slide alone.
+Each slide also counts as one component in the page score, so a carousel of N slides weighs N+1.
 
 Recognised carousels (the first one under the rendering's element):
 
